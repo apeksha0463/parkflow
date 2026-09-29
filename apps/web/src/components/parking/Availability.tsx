@@ -1,9 +1,10 @@
-import { Clock, History, Radio, WifiOff } from 'lucide-react'
+import { Clock } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { formatAge, formatPercent } from '../../lib/format'
+import { availabilityKind, sourceTypeText } from '../../lib/provenance'
 import { statusFromOccupancy, type StatusThresholds } from '../../lib/status'
 import type { Availability } from '../../lib/types'
-import { ProvenanceBadge, StatusBadge } from '../ui/Badges'
+import { SourceBadge, StatusBadge } from '../ui/Badges'
 
 /** Current availability is only "current" for LIVE or SIMULATED fresh data. */
 export const isCurrent = (a: Availability) => a.state === 'LIVE' || a.state === 'SIMULATED'
@@ -34,32 +35,35 @@ export function OccupancyBar({ occupancy, status, className }: { occupancy: numb
 
 /** Compact availability line for list cards. */
 export function AvailabilityInline({ availability: a, thresholds }: { availability: Availability; thresholds?: StatusThresholds }) {
+  const kind = availabilityKind(a)
   if (isCurrent(a)) {
     const status = statusFromOccupancy(a.occupancy, { thresholds })
+    const source = sourceTypeText(a.sourceType)
     return (
       <div className="space-y-1.5">
         <div className="flex flex-wrap items-center gap-1.5 text-sm">
+          <SourceBadge kind={kind} />
           <StatusBadge status={status} />
           {a.available != null && (
             <span className="tabular font-medium text-ink-800">
-              {a.available} <span className="font-normal text-ink-500">spaces</span>
+              {a.available} <span className="font-normal text-ink-500">{a.available === 1 ? 'space' : 'spaces'} available</span>
             </span>
           )}
-          <span className="tabular text-ink-500">· {formatPercent(a.occupancy)} occupied</span>
-          {a.state === 'SIMULATED' && <ProvenanceBadge kind="simulated" />}
+          {a.occupancy != null && <span className="tabular text-ink-500">· {formatPercent(a.occupancy)} occupied</span>}
         </div>
         {a.occupancy != null && <OccupancyBar occupancy={a.occupancy} status={status} />}
         <p className="flex items-center gap-1 text-xs text-ink-500">
           <Clock className="size-3" aria-hidden /> Updated {formatAge(a.ageMinutes)}
+          {source && <span>· {source}</span>}
         </p>
       </div>
     )
   }
-  const Icon = a.state === 'STALE' ? Clock : a.state === 'HISTORICAL_ONLY' ? History : WifiOff
+  // No current data is a normal state for directory listings, not an error: neutral badge + plain reason.
   return (
-    <p className="flex items-center gap-1.5 text-sm text-ink-500">
-      <Icon className="size-3.5 shrink-0" aria-hidden />
-      {a.state === 'STALE' ? `Last reported ${formatAge(a.ageMinutes)} — may be out of date` : a.message}
+    <p className="flex flex-wrap items-center gap-1.5 text-xs text-ink-500">
+      <SourceBadge kind={kind} />
+      <span>{a.state === 'STALE' ? `Last reported ${formatAge(a.ageMinutes)} — not shown as current` : a.message}</span>
     </p>
   )
 }
@@ -72,13 +76,7 @@ export function AvailabilityPanel({ availability: a, thresholds }: { availabilit
     <div>
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-ink-900">Current availability</h2>
-        {a.state === 'LIVE' && (
-          <span className="inline-flex items-center gap-1 text-xs font-medium text-status-available">
-            <Radio className="size-3.5" /> Live
-          </span>
-        )}
-        {a.state === 'SIMULATED' && <ProvenanceBadge kind="simulated" />}
-        {a.state === 'HISTORICAL_ONLY' && <ProvenanceBadge kind="historical" />}
+        <SourceBadge kind={availabilityKind(a)} />
       </div>
 
       {current ? (

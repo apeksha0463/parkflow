@@ -126,7 +126,7 @@ export interface PublicConfig {
   staleAfterMinutes: number
 }
 
-export type PredictionStatus = 'AVAILABLE' | 'INSUFFICIENT_DATA' | 'STALE' | 'SERVICE_UNAVAILABLE'
+export type PredictionStatus = 'AVAILABLE' | 'INSUFFICIENT_DATA' | 'NO_MODEL' | 'STALE' | 'SERVICE_UNAVAILABLE'
 export type PressureLevel = 'NORMAL' | 'APPROACHING_SATURATION' | 'SATURATED'
 
 export interface HorizonPrediction {

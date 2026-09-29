@@ -7,7 +7,7 @@ import { useAuth } from '../auth/AuthContext'
 import { AppHeader } from '../components/layout/AppHeader'
 import { MapView, type Bbox } from '../components/map/MapView'
 import { FacilityCard } from '../components/parking/FacilityCard'
-import { PredictionLine, SpilloverPanel } from '../components/parking/Prediction'
+import { SpilloverPanel } from '../components/parking/Prediction'
 import { DEFAULT_FILTERS, FilterBar, filterQuery, type FilterState, type SortKey } from '../components/parking/Filters'
 import { SearchBox } from '../components/search/SearchBox'
 import { Button } from '../components/ui/Button'
@@ -407,7 +407,6 @@ function SelectedPreview({ id, inList, onClose, thresholds }: { id: string; inLi
             thresholds={thresholds}
             footer={
               <div className="space-y-2.5">
-                <PredictionLine facility={facility} />
                 <SpilloverPanel facility={facility} compact />
                 <div className="flex gap-2">
                   <Link

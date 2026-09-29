@@ -1,4 +1,5 @@
 import { cn } from '../../lib/cn'
+import { SOURCE_KIND_LABEL, type SourceKind } from '../../lib/provenance'
 import { STATUS_LABEL, type ParkingStatus } from '../../lib/status'
 
 const statusStyles: Record<ParkingStatus, string> = {
@@ -38,4 +39,22 @@ const provenanceLabel: Record<Provenance, string> = {
 
 export function ProvenanceBadge({ kind, className }: { kind: Provenance; className?: string }) {
   return <span className={cn(base, 'uppercase tracking-wide text-2xs', provenanceStyles[kind], className)}>{provenanceLabel[kind]}</span>
+}
+
+const sourceStyles: Record<SourceKind, string> = {
+  LIVE: 'bg-status-available-bg text-status-available',
+  API: 'bg-brand-50 text-brand-700',
+  HISTORICAL: 'bg-ink-100 text-ink-600',
+  SIMULATION: 'bg-status-simulated-bg text-status-simulated',
+  UNAVAILABLE: 'bg-white text-ink-500 ring-1 ring-inset ring-ink-200',
+}
+
+/** Source of an availability or prediction value: LIVE, API, HISTORICAL, SIMULATION · RESEARCH or UNAVAILABLE. */
+export function SourceBadge({ kind, className }: { kind: SourceKind; className?: string }) {
+  return (
+    <span className={cn(base, 'uppercase tracking-wide text-2xs', sourceStyles[kind], className)}>
+      {kind === 'LIVE' && <span className="size-1.5 rounded-full bg-current" aria-hidden />}
+      {SOURCE_KIND_LABEL[kind]}
+    </span>
+  )
 }

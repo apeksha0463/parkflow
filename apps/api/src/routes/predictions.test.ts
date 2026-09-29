@@ -106,6 +106,22 @@ describe('GET /api/parking/:id/predictions', () => {
     expect(requests).toHaveLength(0);
   });
 
+  it('never applies the research (Melbourne) model to a real live facility, nor uses it as a neighbour', async () => {
+    await fixtures();
+    await prisma.parkingFacility.update({ where: { id: 'osm' }, data: { availabilityMode: 'LIVE' } });
+    await series('z_osm', Array(24).fill(0.8));
+    await series('z_a', Array(24).fill(0.5));
+
+    const live = await request(app).get('/api/parking/osm/predictions');
+    expect(live.body).toMatchObject({ status: 'NO_MODEL', message: 'Prediction unavailable — no model has been trained for this area yet.', model: null, zones: [] });
+    expect(requests.filter((r) => r.path === '/predict')).toHaveLength(0);
+
+    // The live zone (~110 m away) is inside the model radius but must not feed the simulation zone's model.
+    await request(app).get('/api/parking/a/predictions');
+    const sent = requests.find((r) => r.path === '/predict')!;
+    expect(sent.body.neighbours.every((n: { history: (number | null)[] }) => !n.history.includes(0.8))).toBe(true);
+  });
+
   it('is unavailable when a simulated facility has no snapshots, and stale when data is old', async () => {
     await fixtures();
     expect((await request(app).get('/api/parking/a/predictions')).body.status).toBe('INSUFFICIENT_DATA');

@@ -5,7 +5,10 @@ import { cn } from '../../lib/cn'
 import { directionsUrl, formatDistance } from '../../lib/format'
 import type { StatusThresholds } from '../../lib/status'
 import type { Facility } from '../../lib/types'
+import { predictionKind, predictionUnavailableReason } from '../../lib/provenance'
+import { SourceBadge } from '../ui/Badges'
 import { AvailabilityInline } from './Availability'
+import { PredictionLine } from './Prediction'
 import { TypeIcon } from './meta'
 
 interface Props {
@@ -48,21 +51,35 @@ export function FacilityCard({ facility: f, selected, onSelect, thresholds, onFo
           </div>
           <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-ink-500">
             <span>{f.typeLabel}</span>
+            {/* Directory facts are shown only when the source states them; unknown facts are omitted, never guessed. */}
             {f.capacity != null && <span>· {f.capacity} spaces</span>}
-            {f.isFree === true && <span>· Free</span>}
-            {f.isFree === false && <span>· Paid</span>}
-            {f.openNow === true && <span className="text-status-available">· Open now</span>}
-            {f.openNow === false && <span className="text-status-full">· Closed now</span>}
             {f.evCharging && (
               <span className="inline-flex items-center gap-0.5">
-                · <BatteryCharging className="size-3" aria-hidden /> EV
+                · <BatteryCharging className="size-3" aria-hidden /> EV charging
               </span>
             )}
+            {f.openNow === true && <span className="text-status-available">· Open now</span>}
+            {f.openNow === false && <span className="text-status-full">· Closed now</span>}
+            {f.isFree === true && <span>· Free</span>}
+            {f.isFree === false && <span>· Paid</span>}
             {f.isDemo && <span className="rounded bg-status-simulated-bg px-1 text-2xs font-medium text-status-simulated">DEMO</span>}
           </p>
-          <div className="mt-2.5">
-            <AvailabilityInline availability={f.availability} thresholds={thresholds} />
-          </div>
+          {/* Every status carries its source: LIVE, API, HISTORICAL, SIMULATION · RESEARCH or UNAVAILABLE. */}
+          <dl className="mt-2.5 space-y-2">
+            <div>
+              <dt className="mb-1 text-2xs font-medium tracking-wide text-ink-400 uppercase">Availability</dt>
+              <dd>
+                <AvailabilityInline availability={f.availability} thresholds={thresholds} />
+              </dd>
+            </div>
+            <div>
+              <dt className="mb-1 text-2xs font-medium tracking-wide text-ink-400 uppercase">Prediction</dt>
+              <dd className="flex flex-wrap items-center gap-1.5 text-xs text-ink-500">
+                <SourceBadge kind={predictionKind(f)} />
+                {predictionKind(f) === 'SIMULATION' ? <PredictionLine facility={f} badge={false} /> : <span>{predictionUnavailableReason(f)}</span>}
+              </dd>
+            </div>
+          </dl>
         </div>
         {!onFocus && <ChevronRight className="mt-2 size-4 shrink-0 text-ink-300 transition-transform group-hover:translate-x-0.5" aria-hidden />}
       </div>

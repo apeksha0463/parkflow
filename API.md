@@ -77,7 +77,8 @@ Result item: `{ id, label, sublabel, latitude, longitude, kind: 'locality' | 'pl
 `GET /api/parking/:id/predictions`:
 ```jsonc
 {
-  "status": "AVAILABLE",            // or INSUFFICIENT_DATA | STALE | SERVICE_UNAVAILABLE (then zones = [] and message is set)
+  "status": "AVAILABLE",            // or INSUFFICIENT_DATA | NO_MODEL | STALE | SERVICE_UNAVAILABLE (then zones = [] and message is set).
+                                    // Only SIMULATION (research) zones are predicted; a real LIVE facility gets NO_MODEL.
   "message": null,                  // e.g. "Prediction unavailable — insufficient historical data."
   "provenance": "PREDICTED",
   "model": { "id": "spatial_temporal-hgb-v1", "featureSet": "spatial_temporal", "trainingDataset": "melbourne-on-street-sensors-2019", "trainedAt": "…" },

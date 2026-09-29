@@ -5,10 +5,11 @@ import { api } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import { formatDistance, formatPercent } from '../../lib/format'
 import type { Facility, FacilityPredictions, HorizonPrediction, PressureLevel, Spillover } from '../../lib/types'
+import { NO_HISTORY_MESSAGE, predictionUnavailableReason } from '../../lib/provenance'
 import { ProvenanceBadge } from '../ui/Badges'
 import { Skeleton } from '../ui/primitives'
 
-const NO_SOURCE_MESSAGE = 'Prediction unavailable — insufficient historical data.'
+const NO_SOURCE_MESSAGE = NO_HISTORY_MESSAGE
 
 export const PRESSURE_LABEL: Record<PressureLevel, string> = {
   NORMAL: 'Low pressure',
@@ -23,12 +24,15 @@ const pressureText: Record<PressureLevel, string> = {
 
 type HasSource = Pick<Facility, 'id' | 'availabilityMode'>
 
-/** Predictions are only requested for facilities with an occupancy source; others are unavailable by definition. */
+/**
+ * Predictions are only requested for simulation (research) zones: the only trained model uses the Melbourne 2019
+ * research dataset and is never applied to real Bengaluru facilities. Others are unavailable by definition.
+ */
 export function usePredictions(f: HasSource | undefined) {
   return useQuery({
     queryKey: ['predictions', f?.id],
     queryFn: ({ signal }) => api<FacilityPredictions>(`/api/parking/${f!.id}/predictions`, { signal }),
-    enabled: !!f && f.availabilityMode !== 'NONE',
+    enabled: !!f && f.availabilityMode === 'SIMULATION',
     staleTime: 60_000,
   })
 }
@@ -50,10 +54,10 @@ function Unavailable({ message, className }: { message: string; className?: stri
   return <p className={cn('text-xs text-ink-500', className)}>{message}</p>
 }
 
-/** One-line forecast for cards and the map preview. */
-export function PredictionLine({ facility, className }: { facility: HasSource; className?: string }) {
+/** One-line forecast for cards and the map preview. `badge={false}` when the caller shows the source itself. */
+export function PredictionLine({ facility, className, badge = true }: { facility: HasSource; className?: string; badge?: boolean }) {
   const q = usePredictions(facility)
-  if (facility.availabilityMode === 'NONE') return <Unavailable message={NO_SOURCE_MESSAGE} className={className} />
+  if (facility.availabilityMode !== 'SIMULATION') return <Unavailable message={predictionUnavailableReason(facility)} className={className} />
   if (q.isPending) return <Skeleton className={cn('h-4 w-48', className)} />
   if (q.isError) return <Unavailable message="Prediction temporarily unavailable." className={className} />
   const d = q.data
@@ -62,7 +66,7 @@ export function PredictionLine({ facility, className }: { facility: HasSource; c
   if (!p) return <Unavailable message={NO_SOURCE_MESSAGE} className={className} />
   return (
     <p className={cn('flex flex-wrap items-center gap-1.5 text-xs text-ink-700', className)}>
-      <ProvenanceBadge kind="predicted" />
+      {badge && <ProvenanceBadge kind="predicted" />}
       <TrendingUp className="size-3.5 text-status-predicted" aria-hidden />
       <span>
         Predicted occupancy <span className="tabular font-semibold">{formatPercent(p.predictedOccupancy)}</span> in {p.horizonMinutes} min
@@ -75,7 +79,7 @@ export function PredictionLine({ facility, className }: { facility: HasSource; c
 /** Detail-page forecast: current value and every horizon the model supports. */
 export function PredictionPanel({ facility }: { facility: HasSource }) {
   const q = usePredictions(facility)
-  if (facility.availabilityMode === 'NONE') return <Unavailable message={NO_SOURCE_MESSAGE} />
+  if (facility.availabilityMode !== 'SIMULATION') return <Unavailable message={predictionUnavailableReason(facility)} />
   if (q.isPending) return <Skeleton className="h-32 w-full" />
   if (q.isError) return <Unavailable message="Prediction temporarily unavailable." />
   const d = q.data

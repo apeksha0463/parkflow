@@ -5,6 +5,9 @@
  * simulation). Otherwise the response says why no prediction exists; nothing is ever estimated here.
  * Model inputs are built from stored snapshots on the model's 5-minute grid; neighbours are other zones
  * within the radius the model was trained with (read from the model metadata).
+ *
+ * The only trained model uses the Melbourne 2019 research dataset, so predictions are served ONLY for
+ * clearly-labelled simulation zones. A real (LIVE) Bengaluru facility gets NO_MODEL, never Melbourne output.
  */
 import { prisma } from '../lib/db.js';
 import { getSettings } from './settings.js';
@@ -15,10 +18,11 @@ export const STEP_MIN = 5;
 export const HISTORY_STEPS = 7 * 24 * (60 / STEP_MIN) + 1;
 const STEP_MS = STEP_MIN * 60_000;
 
-export type PredictionStatus = 'AVAILABLE' | 'INSUFFICIENT_DATA' | 'STALE' | 'SERVICE_UNAVAILABLE';
+export type PredictionStatus = 'AVAILABLE' | 'INSUFFICIENT_DATA' | 'NO_MODEL' | 'STALE' | 'SERVICE_UNAVAILABLE';
 
 export const STATUS_MESSAGE: Record<Exclude<PredictionStatus, 'AVAILABLE'>, string> = {
   INSUFFICIENT_DATA: 'Prediction unavailable — insufficient historical data.',
+  NO_MODEL: 'Prediction unavailable — no model has been trained for this area yet.',
   STALE: 'Prediction unavailable — occupancy data is out of date.',
   SERVICE_UNAVAILABLE: 'Prediction temporarily unavailable.',
 };
@@ -92,7 +96,7 @@ async function neighbourZones(zoneId: string, radiusM: number) {
     SELECT n.id, ST_Distance(n.location, z.location) AS distance
       FROM "ParkingZone" z
       JOIN "ParkingZone" n ON n.id <> z.id AND ST_DWithin(n.location, z.location, ${radiusM})
-      JOIN "ParkingFacility" f ON f.id = n."facilityId" AND f."availabilityMode" <> 'NONE'
+      JOIN "ParkingFacility" f ON f.id = n."facilityId" AND f."availabilityMode" = 'SIMULATION'
      WHERE z.id = ${zoneId}
      ORDER BY distance
      LIMIT 50`;
@@ -212,6 +216,8 @@ export async function facilityPredictions(facilityId: string, now: Date = new Da
   });
   if (!facility) return null;
   if (facility.availabilityMode === 'NONE' || facility.zones.length === 0) return unavailable('INSUFFICIENT_DATA');
+  // Research model only: never apply it to real (non-simulation) facilities.
+  if (facility.availabilityMode !== 'SIMULATION') return unavailable('NO_MODEL');
 
   const settings = await getSettings();
   const latest = await prisma.occupancySnapshot.findFirst({
