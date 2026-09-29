@@ -1,0 +1,13 @@
+{
+  "grid_step_minutes": 5,
+  "grid_instants_per_zone": 105120,
+  "zones": 335,
+  "overlapping_intervals_clipped": 22164,
+  "min_observed_bays": 4,
+  "valid_zone_instants": 25785352,
+  "valid_fraction": 0.7322,
+  "zones_with_any_valid": 282,
+  "occupancy_min": 0.0,
+  "occupancy_max": 1.0,
+  "occupancy_mean": 0.4878
+}

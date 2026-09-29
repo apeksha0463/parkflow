@@ -1,0 +1,14 @@
+{
+  "raw_rows": 42672743,
+  "removed_missing_fields": 32251,
+  "removed_unparseable_time": 0,
+  "removed_non_positive_duration": 21202,
+  "removed_outside_2019": 0,
+  "removed_invalid_vehicle_present": 0,
+  "removed_duplicates": 191,
+  "final_rows": 42619099,
+  "devices": 6623,
+  "zones": 335,
+  "first_start": "2019-01-01 00:00:00",
+  "last_end": "2019-12-31 23:59:54"
+}

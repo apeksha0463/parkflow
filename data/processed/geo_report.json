@@ -1,0 +1,19 @@
+{
+  "zones": 335,
+  "zones_located": 253,
+  "sensors_in_located_zones": 5341,
+  "sensors_total": 6623,
+  "neighbour_radius_m": 200,
+  "neighbour_pairs": 1110,
+  "neighbours_per_zone": {
+    "count": 253.0,
+    "mean": 4.39,
+    "std": 2.07,
+    "min": 0.0,
+    "25%": 3.0,
+    "50%": 4.0,
+    "75%": 6.0,
+    "max": 10.0
+  },
+  "located_zones_without_neighbours": 10
+}

@@ -16,8 +16,11 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*.parquet
 data/processed/*.csv
+data/processed/*.npz
+data/processed/*.txt
+ml/evaluation/saturation_events.csv
 !data/processed/.gitkeep
-ml/artifacts/*.joblib
+# Trained models (~1 MB each) are committed so the ML service deploys with them; see ML_PIPELINE.md
 .DS_Store
 .vscode/
 .idea/
