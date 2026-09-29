@@ -5,10 +5,11 @@ import { createApp } from './app.js';
 const app = createApp();
 
 describe('app foundation', () => {
-  it('GET /health returns ok', async () => {
+  it('GET /health reports ok with database up', async () => {
     const res = await request(app).get('/health');
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ok');
+    expect(res.body.database).toBe('up');
   });
 
   it('unknown routes return JSON 404 without stack traces', async () => {

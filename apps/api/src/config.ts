@@ -1,5 +1,10 @@
-import 'dotenv/config';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { config as loadEnv } from 'dotenv';
 import { z } from 'zod';
+
+// Local development shares the workspace-root .env. In production, variables come from the host.
+loadEnv({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../.env'), quiet: true });
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -9,6 +14,7 @@ const EnvSchema = z.object({
   CORS_ORIGINS: z.string().default('http://localhost:5173'),
   ML_SERVICE_URL: z.string().url().default('http://localhost:8000'),
   GEOCODER_USER_AGENT: z.string().default('ParkFlow/0.1'),
+  COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

@@ -1,0 +1,324 @@
+// ParkFlow data model.
+// Unknown facts are stored as NULL and never guessed. PostGIS geography columns are
+// maintained by DB triggers from latitude/longitude (see the postgis migration).
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum ParkingType {
+  PUBLIC
+  ON_STREET
+  OFF_STREET
+  MULTI_LEVEL
+  UNDERGROUND
+  MALL
+  HOSPITAL
+  HOTEL
+  METRO
+  RAILWAY
+  EDUCATIONAL
+  COMMERCIAL
+  PRIVATE_PUBLIC_ACCESS
+  RESIDENTIAL
+  EV_CHARGING
+  UNKNOWN
+}
+
+enum SourceType {
+  LIVE_SENSOR
+  PUBLIC_API
+  PARKING_OPERATOR
+  VERIFIED_DIRECTORY
+  USER_REPORTED
+  HISTORICAL_DATA
+  SIMULATION
+  UNKNOWN
+}
+
+/// How (if at all) current availability is obtained for a facility.
+/// NONE: UI shows "Availability currently unavailable". LIVE: real provider feed.
+/// SIMULATION: historical-replay demo, always labelled as simulation.
+enum AvailabilityMode {
+  NONE
+  LIVE
+  SIMULATION
+}
+
+enum VehicleType {
+  CAR
+  TWO_WHEELER
+  BICYCLE
+  BUS
+  TRUCK
+}
+
+enum ZoneKind {
+  WHOLE_FACILITY
+  LEVEL
+  SEGMENT
+  AREA
+}
+
+enum SaturationState {
+  NORMAL
+  APPROACHING_SATURATION
+  SATURATED
+}
+
+enum ModelFeatureSet {
+  BASELINE
+  TEMPORAL
+  SPATIAL_TEMPORAL
+}
+
+enum BookingStatus {
+  CONFIRMED
+  CANCELLED
+}
+
+model User {
+  id             String         @id @default(cuid())
+  email          String         @unique
+  name           String
+  passwordHash   String
+  role           Role           @default(USER)
+  /// Incremented on logout / password change to invalidate existing tokens.
+  tokenVersion   Int            @default(0)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  bookings       Booking[]
+  savedParking   SavedParking[]
+  recentSearches RecentSearch[]
+  auditLogs      AuditLog[]
+}
+
+model DataSource {
+  id             String            @id @default(cuid())
+  name           String            @unique
+  sourceType     SourceType
+  url            String?
+  license        String?
+  description    String?
+  lastVerifiedAt DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  facilities     ParkingFacility[]
+}
+
+model ParkingFacility {
+  id               String                                 @id @default(cuid())
+  /// Stable id from the upstream source, e.g. "osm:way/123456".
+  externalId       String?                                @unique
+  name             String
+  type             ParkingType                            @default(UNKNOWN)
+  address          String?
+  area             String?
+  latitude         Float
+  longitude        Float
+  location         Unsupported("geography(Point, 4326)")?
+  capacity         Int?
+  vehicleTypes     VehicleType[]
+  evCharging       Boolean?
+  /// Pricing as reported by the source (e.g. OSM fee/charge tags); null means unknown.
+  pricingText      String?
+  isFree           Boolean?
+  /// OSM opening_hours syntax or plain text; null means unknown.
+  operatingHours   String?
+  availabilityMode AvailabilityMode                       @default(NONE)
+  /// Demo/simulation facility. Never mixed into research evaluation.
+  isDemo           Boolean                                @default(false)
+  bookingEnabled   Boolean                                @default(false)
+  dataSourceId     String
+  dataSource       DataSource                             @relation(fields: [dataSourceId], references: [id])
+  sourceUrl        String?
+  lastVerifiedAt   DateTime?
+  createdAt        DateTime                               @default(now())
+  updatedAt        DateTime                               @updatedAt
+  zones            ParkingZone[]
+  bookings         Booking[]
+  savedBy          SavedParking[]
+
+  @@index([area])
+  @@index([type])
+  @@index([location], type: Gist)
+}
+
+/// The unit for which occupancy is tracked and predicted. A simple lot has one
+/// WHOLE_FACILITY zone; a multi-level car park has one LEVEL zone per floor;
+/// on-street parking has SEGMENT zones.
+model ParkingZone {
+  id               String                                 @id @default(cuid())
+  facilityId       String
+  facility         ParkingFacility                        @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  name             String
+  kind             ZoneKind                               @default(WHOLE_FACILITY)
+  levelNumber      Int?
+  capacity         Int?
+  latitude         Float
+  longitude        Float
+  location         Unsupported("geography(Point, 4326)")?
+  saturationState  SaturationState                        @default(NORMAL)
+  /// Research-dataset zone whose history is replayed onto this demo zone (simulation only).
+  replaySourceZone String?
+  createdAt        DateTime                               @default(now())
+  updatedAt        DateTime                               @updatedAt
+  snapshots        OccupancySnapshot[]
+  saturationEvents SaturationEvent[]
+  predictions      Prediction[]
+  bookings         Booking[]
+
+  @@index([facilityId])
+  @@index([location], type: Gist)
+}
+
+model OccupancySnapshot {
+  id         BigInt      @id @default(autoincrement())
+  zoneId     String
+  zone       ParkingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  observedAt DateTime
+  occupied   Int?
+  available  Int?
+  capacity   Int?
+  /// occupied / capacity, normally in [0, 1].
+  occupancy  Float
+  sourceType SourceType
+  createdAt  DateTime    @default(now())
+
+  @@unique([zoneId, observedAt])
+  @@index([observedAt])
+}
+
+model SaturationEvent {
+  id            String       @id @default(cuid())
+  zoneId        String
+  zone          ParkingZone  @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  startedAt     DateTime
+  endedAt       DateTime?
+  peakOccupancy Float
+  threshold     Float
+  isSimulated   Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  predictions   Prediction[]
+
+  @@index([zoneId, startedAt])
+  @@index([endedAt])
+}
+
+model ModelVersion {
+  /// e.g. "spatial_temporal-hgb-20261001"
+  id              String          @id
+  featureSet      ModelFeatureSet
+  algorithm       String
+  trainingDataset String
+  trainedAt       DateTime
+  featureVersion  String
+  horizonsMinutes Int[]
+  /// Metrics produced by the actual evaluation run (copied from registry.json).
+  metrics         Json
+  isActive        Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  predictions     Prediction[]
+}
+
+model Prediction {
+  id                 BigInt           @id @default(autoincrement())
+  zoneId             String
+  zone               ParkingZone      @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  modelVersionId     String
+  modelVersion       ModelVersion     @relation(fields: [modelVersionId], references: [id])
+  triggerEventId     String?
+  triggerEvent       SaturationEvent? @relation(fields: [triggerEventId], references: [id], onDelete: SetNull)
+  /// Time of the latest observation the prediction is based on.
+  predictionTime     DateTime
+  horizonMinutes     Int
+  targetTime         DateTime
+  predictedOccupancy Float
+  /// Filled in once the observed occupancy at targetTime is known.
+  actualOccupancy    Float?
+  absError           Float?
+  evaluatedAt        DateTime?
+  isSimulated        Boolean          @default(false)
+  createdAt          DateTime         @default(now())
+
+  @@unique([zoneId, modelVersionId, predictionTime, horizonMinutes])
+  @@index([zoneId, targetTime])
+  @@index([evaluatedAt])
+}
+
+model Booking {
+  id           String          @id @default(cuid())
+  userId       String
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  facilityId   String
+  facility     ParkingFacility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  zoneId       String?
+  zone         ParkingZone?    @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  startTime    DateTime
+  endTime      DateTime
+  vehicleType  VehicleType
+  vehiclePlate String?
+  status       BookingStatus   @default(CONFIRMED)
+  cancelledAt  DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([userId, startTime])
+  @@index([facilityId, startTime, endTime])
+}
+
+model SavedParking {
+  userId     String
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  facilityId String
+  facility   ParkingFacility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  createdAt  DateTime        @default(now())
+
+  @@id([userId, facilityId])
+}
+
+model RecentSearch {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  query     String
+  latitude  Float
+  longitude Float
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
+
+model SystemConfig {
+  key         String   @id
+  value       Json
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+}
