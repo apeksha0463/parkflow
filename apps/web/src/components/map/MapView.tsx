@@ -70,8 +70,17 @@ function ViewController({ center, zoom, flyKey }: { center?: [number, number]; z
   useEffect(() => {
     if (!center || flyKey === last.current) return
     last.current = flyKey
-    map.flyTo(center, zoom ?? map.getZoom(), { duration: 0.8 })
+    // flyTo throws on a hidden (0×0) map, e.g. the mobile list view; jump there instead.
+    const { x, y } = map.getSize()
+    if (x && y) map.flyTo(center, zoom ?? map.getZoom(), { duration: 0.8 })
+    else map.setView(center, zoom ?? map.getZoom(), { animate: false })
   }, [map, center, zoom, flyKey])
+  // Leaflet only tracks window resizes; re-measure when the container is shown or resized.
+  useEffect(() => {
+    const ro = new ResizeObserver(() => map.invalidateSize())
+    ro.observe(map.getContainer())
+    return () => ro.disconnect()
+  }, [map])
   return null
 }
 
@@ -129,6 +138,17 @@ export function MapView({
       }),
     [],
   )
+  const selected = selectedId ? markers.find((m) => m.id === selectedId) : undefined
+  const renderMarker = (m: MapMarker, isSelected: boolean) => (
+    <Marker
+      key={m.id}
+      position={[m.latitude, m.longitude]}
+      icon={markerIcon(m.availabilityState, m.occupancy, isSelected, m.isDemo, thresholds)}
+      zIndexOffset={isSelected ? 1000 : 0}
+      eventHandlers={onMarkerClick ? { click: () => onMarkerClick(m.id) } : undefined}
+      title={m.isDemo ? 'Demo facility (simulation)' : 'Parking facility'}
+    />
+  )
 
   return (
     <MapContainer
@@ -145,9 +165,9 @@ export function MapView({
       attributionControl
     >
       <TileLayer
-        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        subdomains="abcd"
+        // Standard OpenStreetMap tiles (CARTO basemaps now return an "API key required" placeholder without a key).
+        url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         maxZoom={19}
       />
       <ViewController center={center} zoom={zoom} flyKey={flyKey} />
@@ -157,17 +177,10 @@ export function MapView({
       )}
       {destination && <Marker position={destination} icon={destIcon} interactive={false} keyboard={false} />}
       <MarkerClusterGroup chunkedLoading showCoverageOnHover={false} maxClusterRadius={48} iconCreateFunction={clusterIcon}>
-        {markers.map((m) => (
-          <Marker
-            key={m.id}
-            position={[m.latitude, m.longitude]}
-            icon={markerIcon(m.availabilityState, m.occupancy, m.id === selectedId, m.isDemo, thresholds)}
-            zIndexOffset={m.id === selectedId ? 1000 : 0}
-            eventHandlers={onMarkerClick ? { click: () => onMarkerClick(m.id) } : undefined}
-            title={m.isDemo ? 'Demo facility (simulation)' : 'Parking facility'}
-          />
-        ))}
+        {markers.map((m) => m.id !== selectedId && renderMarker(m, false))}
       </MarkerClusterGroup>
+      {/* The selected marker sits outside the cluster group so it is never hidden inside a cluster. */}
+      {selected && renderMarker(selected, true)}
     </MapContainer>
   )
 }
