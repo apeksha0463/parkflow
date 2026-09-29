@@ -30,3 +30,8 @@ export const VEHICLE_LABEL: Record<string, string> = {
   BUS: 'Bus',
   TRUCK: 'Truck',
 }
+
+/** OpenStreetMap routing to the facility's recorded coordinates (the user picks their start point there). */
+export function directionsUrl(lat: number, lng: number): string {
+  return `https://www.openstreetmap.org/directions?to=${lat}%2C${lng}#map=17/${lat}/${lng}`
+}

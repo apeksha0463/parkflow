@@ -1,7 +1,8 @@
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { BatteryCharging, ChevronRight } from 'lucide-react'
+import { BatteryCharging, ChevronRight, Navigation } from 'lucide-react'
 import { cn } from '../../lib/cn'
-import { formatDistance } from '../../lib/format'
+import { directionsUrl, formatDistance } from '../../lib/format'
 import type { StatusThresholds } from '../../lib/status'
 import type { Facility } from '../../lib/types'
 import { AvailabilityInline } from './Availability'
@@ -12,9 +13,12 @@ interface Props {
   selected?: boolean
   onSelect?: (id: string) => void
   thresholds?: StatusThresholds
+  /** When set, clicking the card focuses it (e.g. on the map) and details/directions become explicit links. */
+  onFocus?: (f: Facility) => void
+  footer?: ReactNode
 }
 
-export function FacilityCard({ facility: f, selected, onSelect, thresholds }: Props) {
+export function FacilityCard({ facility: f, selected, onSelect, thresholds, onFocus, footer }: Props) {
   return (
     <article
       className={cn(
@@ -30,9 +34,15 @@ export function FacilityCard({ facility: f, selected, onSelect, thresholds }: Pr
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <h3 className="min-w-0 text-sm leading-snug font-semibold text-ink-900">
-              <Link to={`/parking/${f.id}`} className="after:absolute after:inset-0 focus:outline-none">
-                <span className={cn(f.nameIsDerived && 'font-medium text-ink-700')}>{f.displayName}</span>
-              </Link>
+              {onFocus ? (
+                <button type="button" onClick={() => onFocus(f)} className="text-left after:absolute after:inset-0 focus:outline-none" aria-label={`Show ${f.displayName} on the map`}>
+                  <span className={cn(f.nameIsDerived && 'font-medium text-ink-700')}>{f.displayName}</span>
+                </button>
+              ) : (
+                <Link to={`/parking/${f.id}`} className="after:absolute after:inset-0 focus:outline-none">
+                  <span className={cn(f.nameIsDerived && 'font-medium text-ink-700')}>{f.displayName}</span>
+                </Link>
+              )}
             </h3>
             {f.distanceMeters != null && <span className="tabular shrink-0 text-xs font-medium text-ink-500">{formatDistance(f.distanceMeters)}</span>}
           </div>
@@ -54,8 +64,19 @@ export function FacilityCard({ facility: f, selected, onSelect, thresholds }: Pr
             <AvailabilityInline availability={f.availability} thresholds={thresholds} />
           </div>
         </div>
-        <ChevronRight className="mt-2 size-4 shrink-0 text-ink-300 transition-transform group-hover:translate-x-0.5" aria-hidden />
+        {!onFocus && <ChevronRight className="mt-2 size-4 shrink-0 text-ink-300 transition-transform group-hover:translate-x-0.5" aria-hidden />}
       </div>
+      {footer && <div className="relative z-10 mt-3 border-t border-ink-100 pt-3">{footer}</div>}
+      {onFocus && (
+        <div className="relative z-10 mt-3 flex gap-4 text-xs font-medium">
+          <Link to={`/parking/${f.id}`} className="text-brand-700 hover:underline">
+            Details
+          </Link>
+          <a href={directionsUrl(f.latitude, f.longitude)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-ink-600 hover:text-ink-900">
+            <Navigation className="size-3" aria-hidden /> Directions
+          </a>
+        </div>
+      )}
     </article>
   )
 }

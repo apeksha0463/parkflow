@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { Info, List, Map as MapIcon, MapPin, SearchX, X } from 'lucide-react'
+import { Info, List, LocateFixed, Map as MapIcon, MapPin, Navigation, RefreshCw, SearchX, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { useAuth } from '../auth/AuthContext'
 import { AppHeader } from '../components/layout/AppHeader'
 import { MapView, type Bbox } from '../components/map/MapView'
 import { FacilityCard } from '../components/parking/FacilityCard'
+import { PredictionLine, SpilloverPanel } from '../components/parking/Prediction'
 import { DEFAULT_FILTERS, FilterBar, filterQuery, type FilterState, type SortKey } from '../components/parking/Filters'
 import { SearchBox } from '../components/search/SearchBox'
 import { Button } from '../components/ui/Button'
 import { EmptyState, ErrorState, Skeleton } from '../components/ui/primitives'
 import { api, errorMessage } from '../lib/api'
 import { cn } from '../lib/cn'
+import { directionsUrl } from '../lib/format'
 import { useThresholds } from '../lib/hooks'
 import type { StatusThresholds } from '../lib/status'
 import type { Facility, FacilityDetail, FacilityList, MapMarker, ParkingType, SearchResult } from '../lib/types'
@@ -41,6 +44,21 @@ function writeFilters(p: URLSearchParams, f: FilterState) {
   set('sort', f.sort !== DEFAULT_FILTERS.sort ? f.sort : null)
 }
 
+/** Parses "w,s,e,n" from the URL (area search). */
+function readBbox(v: string | null): Bbox | null {
+  const b = v?.split(',').map(Number)
+  return b && b.length === 4 && b.every(Number.isFinite) && b[0] < b[2] && b[1] < b[3] ? (b as Bbox) : null
+}
+
+/** True when the visible map has moved away from what the list currently shows (by > 25% of the view). */
+export function viewMovedAway(view: Bbox, listCenter: [number, number] | null): boolean {
+  if (!listCenter) return true
+  const [w, s, e, n] = view
+  const dx = Math.abs((w + e) / 2 - listCenter[1]) / (e - w)
+  const dy = Math.abs((s + n) / 2 - listCenter[0]) / (n - s)
+  return dx > 0.25 || dy > 0.25
+}
+
 /** Rounds a bbox outward so tiny pans reuse the cached marker query. */
 const roundBbox = (b: Bbox): Bbox => [Math.floor(b[0] * 50) / 50, Math.floor(b[1] * 50) / 50, Math.ceil(b[2] * 50) / 50, Math.ceil(b[3] * 50) / 50]
 
@@ -52,9 +70,19 @@ export default function Explore() {
   const lat = params.get('lat') ? Number(params.get('lat')) : null
   const lng = params.get('lng') ? Number(params.get('lng')) : null
   const label = params.get('label') ?? ''
-  const destination: [number, number] | null = lat != null && lng != null && !Number.isNaN(lat) && !Number.isNaN(lng) ? [lat, lng] : null
+  const areaBbox = readBbox(params.get('bbox'))
+  const areaCenter: [number, number] | null = areaBbox ? [(areaBbox[1] + areaBbox[3]) / 2, (areaBbox[0] + areaBbox[2]) / 2] : null
+  const pointDestination: [number, number] | null = lat != null && lng != null && !Number.isNaN(lat) && !Number.isNaN(lng) ? [lat, lng] : null
+  // The list is centred on the searched point, or on the map area the user chose with "Search this area".
+  const destination = areaCenter ?? pointDestination
   const selectedId = params.get('sel')
   const [bbox, setBbox] = useState<Bbox | null>(null)
+  const [viewZoom, setViewZoom] = useState(12)
+  const [focus, setFocus] = useState<{ center: [number, number]; key: string } | null>(null)
+  const [locating, setLocating] = useState(false)
+  // The floating preview opens on an explicit click (marker or result), not on hover.
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const focusSeq = useRef(0)
   const [mobileView, setMobileView] = useState<'map' | 'list'>('list')
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -72,13 +100,19 @@ export default function Explore() {
     [setParams],
   )
 
-  const onSelectDestination = (r: SearchResult) => {
+  const goTo = (latitude: number, longitude: number, text: string) => {
+    setFocus(null)
     update((p) => {
-      p.set('lat', r.latitude.toFixed(6))
-      p.set('lng', r.longitude.toFixed(6))
-      p.set('label', r.label)
+      p.set('lat', latitude.toFixed(6))
+      p.set('lng', longitude.toFixed(6))
+      p.set('label', text)
+      p.delete('bbox')
       p.delete('sel')
     }, false)
+  }
+
+  const onSelectDestination = (r: SearchResult) => {
+    goTo(r.latitude, r.longitude, r.label)
     setMobileView('list')
     if (user) {
       api('/api/search/recent', { method: 'POST', body: { query: r.label, latitude: r.latitude, longitude: r.longitude } }).catch(() => undefined)
@@ -90,8 +124,52 @@ export default function Explore() {
       p.delete('lat')
       p.delete('lng')
       p.delete('label')
+      p.delete('bbox')
       p.delete('sel')
     }, false)
+
+  /** List parking inside the visible map, without moving the map. */
+  const searchThisArea = () => {
+    if (!bbox) return
+    setFocus(null)
+    update((p) => {
+      p.set('bbox', bbox.map((v) => v.toFixed(5)).join(','))
+      p.set('label', 'this map area')
+      p.delete('lat')
+      p.delete('lng')
+      p.delete('sel')
+    }, false)
+  }
+
+  const useMyLocation = () => {
+    if (!('geolocation' in navigator)) {
+      toast.error('Location is not available in this browser. Search for a destination instead.')
+      return
+    }
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false)
+        goTo(pos.coords.latitude, pos.coords.longitude, 'Your location')
+      },
+      (err) => {
+        setLocating(false)
+        toast.error(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location permission denied. Search for a destination instead.'
+            : 'Could not get your location. Search for a destination instead.',
+        )
+      },
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 60_000 },
+    )
+  }
+
+  const focusFacility = (f: Facility) => {
+    focusSeq.current += 1
+    setFocus({ center: [f.latitude, f.longitude], key: `sel:${f.id}:${focusSeq.current}` })
+    setPreviewOpen(true)
+    select(f.id)
+  }
 
   const select = useCallback((id: string | null) => update((p) => (id ? p.set('sel', id) : p.delete('sel'))), [update])
 
@@ -103,10 +181,19 @@ export default function Explore() {
   })
 
   const list = useInfiniteQuery({
-    queryKey: ['parking', destination, filters],
+    queryKey: ['parking', destination, areaBbox, filters],
     queryFn: ({ pageParam, signal }) =>
       api<FacilityList>('/api/parking', {
-        query: { lat: destination![0], lng: destination![1], radius: filters.radius, sort: filters.sort, page: pageParam, pageSize: PAGE_SIZE, ...filterQuery(filters) },
+        query: {
+          lat: destination![0],
+          lng: destination![1],
+          // Area search: everything inside the chosen bounds (radius at its maximum so the box decides).
+          ...(areaBbox ? { bbox: areaBbox.join(','), radius: 10_000 } : { radius: filters.radius }),
+          sort: filters.sort,
+          page: pageParam,
+          pageSize: PAGE_SIZE,
+          ...filterQuery(filters),
+        },
         signal,
       }),
     initialPageParam: 1,
@@ -127,8 +214,14 @@ export default function Explore() {
   }, [selectedId])
 
   const selectedFacility = facilities.find((f) => f.id === selectedId)
-  const flyKey = destination ? `${destination[0]},${destination[1]}` : 'city'
-  const zoom = destination ? (filters.radius <= 1000 ? 15 : filters.radius <= 2000 ? 14 : 13) : 12
+  const zoom = pointDestination ? (filters.radius <= 1000 ? 15 : filters.radius <= 2000 ? 14 : 13) : 12
+  // Where the map should fly: a focused list item, else the searched point. Area search never moves the map.
+  const view = focus
+    ? { center: focus.center, zoom: Math.max(viewZoom, 16), key: focus.key }
+    : areaBbox
+      ? { center: undefined, zoom: viewZoom, key: 'area' }
+      : { center: pointDestination ?? undefined, zoom, key: pointDestination ? `${pointDestination[0]},${pointDestination[1]}` : 'city' }
+  const showSearchArea = !!bbox && viewZoom >= 13 && viewMovedAway(bbox, destination)
 
   return (
     <div className="flex h-dvh flex-col">
@@ -204,7 +297,13 @@ export default function Explore() {
                 <ul className="space-y-2.5">
                   {facilities.map((f) => (
                     <li key={f.id} data-id={f.id}>
-                      <FacilityCard facility={f} selected={f.id === selectedId} onSelect={(id) => id !== selectedId && select(id)} thresholds={thresholds} />
+                      <FacilityCard
+                        facility={f}
+                        selected={f.id === selectedId}
+                        onSelect={(id) => id !== selectedId && select(id)}
+                        onFocus={focusFacility}
+                        thresholds={thresholds}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -226,19 +325,48 @@ export default function Explore() {
             selectedId={selectedId}
             onMarkerClick={(id) => {
               selectedFromMap.current = true
+              setPreviewOpen(true)
               select(id)
             }}
-            onBoundsChange={(b) => setBbox(b)}
-            center={destination ?? undefined}
-            zoom={zoom}
-            flyKey={flyKey}
-            destination={destination}
-            radiusMeters={destination ? filters.radius : null}
+            onBoundsChange={(b, z) => {
+              setBbox(b)
+              setViewZoom(z)
+            }}
+            center={view.center}
+            zoom={view.zoom}
+            flyKey={view.key}
+            destination={pointDestination}
+            radiusMeters={pointDestination && !areaBbox ? filters.radius : null}
             thresholds={thresholds}
           />
+          {showSearchArea && (
+            <div className="absolute top-3 left-1/2 z-[1000] -translate-x-1/2">
+              <Button size="sm" className="rounded-full shadow-pop" onClick={searchThisArea}>
+                <RefreshCw className="size-3.5" /> Search this area
+              </Button>
+            </div>
+          )}
+          <Button
+            variant="secondary"
+            size="sm"
+            className="absolute bottom-24 left-3 z-[1000] rounded-full shadow-pop md:bottom-5"
+            onClick={useMyLocation}
+            loading={locating}
+            aria-label="Use my location"
+          >
+            <LocateFixed className="size-4" /> <span className="hidden sm:inline">Use my location</span>
+          </Button>
           <MapLegend count={markers.data?.items.length} loading={markers.isFetching} error={markers.isError} />
-          {selectedId && (mobileView === 'map' || !selectedFacility) && (
-            <SelectedPreview id={selectedId} inList={selectedFacility} onClose={() => select(null)} thresholds={thresholds} />
+          {selectedId && (previewOpen || !selectedFacility) && (
+            <SelectedPreview
+              id={selectedId}
+              inList={selectedFacility}
+              onClose={() => {
+                setPreviewOpen(false)
+                select(null)
+              }}
+              thresholds={thresholds}
+            />
           )}
         </section>
 
@@ -273,7 +401,33 @@ function SelectedPreview({ id, inList, onClose, thresholds }: { id: string; inLi
     <div className="absolute inset-x-3 bottom-20 z-[1000] md:bottom-5 md:left-5 md:right-auto md:w-[380px]">
       <div className="relative rounded-lg shadow-pop">
         {facility ? (
-          <FacilityCard facility={facility} selected thresholds={thresholds} />
+          <FacilityCard
+            facility={facility}
+            selected
+            thresholds={thresholds}
+            footer={
+              <div className="space-y-2.5">
+                <PredictionLine facility={facility} />
+                <SpilloverPanel facility={facility} compact />
+                <div className="flex gap-2">
+                  <Link
+                    to={`/parking/${facility.id}`}
+                    className="inline-flex h-8 items-center rounded-md bg-brand-600 px-3 text-xs font-semibold text-white hover:bg-brand-700"
+                  >
+                    View details
+                  </Link>
+                  <a
+                    href={directionsUrl(facility.latitude, facility.longitude)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-ink-200 bg-white px-3 text-xs font-semibold text-ink-700 hover:bg-ink-50"
+                  >
+                    <Navigation className="size-3.5" /> Directions
+                  </a>
+                </div>
+              </div>
+            }
+          />
         ) : detail.isError ? (
           <div className="rounded-lg bg-white p-4 text-sm text-status-full">{errorMessage(detail.error)}</div>
         ) : (

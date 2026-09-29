@@ -125,3 +125,58 @@ export interface PublicConfig {
   approachingThreshold: number
   staleAfterMinutes: number
 }
+
+export type PredictionStatus = 'AVAILABLE' | 'INSUFFICIENT_DATA' | 'STALE' | 'SERVICE_UNAVAILABLE'
+export type PressureLevel = 'NORMAL' | 'APPROACHING_SATURATION' | 'SATURATED'
+
+export interface HorizonPrediction {
+  horizonMinutes: number
+  targetTime?: string
+  predictedOccupancy: number
+  pressureLevel: PressureLevel | null
+}
+
+export interface FacilityPredictions {
+  status: PredictionStatus
+  message: string | null
+  provenance: 'PREDICTED'
+  model: { id: string; featureSet: string; trainingDataset: string; trainedAt: string } | null
+  zones: {
+    zoneId: string
+    zoneName: string
+    basedOn: string
+    currentOccupancy: number
+    currentState: PressureLevel | null
+    neighboursUsed: number
+    isSimulated: boolean
+    predictions: HorizonPrediction[]
+  }[]
+}
+
+export interface SpilloverCandidate {
+  id: string
+  displayName: string
+  type: ParkingType
+  latitude: number
+  longitude: number
+  distanceMeters: number
+  openNow: boolean | null
+  availability: Availability
+  predicted: HorizonPrediction | null
+  predictionStatus: PredictionStatus
+}
+
+export interface Spillover {
+  facilityId: string
+  thresholds: { saturation: number; approaching: number }
+  neighbourRadiusMeters: number
+  origin: {
+    availability: Availability
+    pressureLevel: PressureLevel | null
+    activeSaturationEvent: { id: string; startedAt: string; peakOccupancy: number; threshold: number; isSimulated: boolean } | null
+  }
+  spilloverContext: boolean
+  warnings: { facilityId: string; displayName: string; currentOccupancy: number; predictedOccupancy: number; horizonMinutes: number; message: string }[]
+  alternatives: (SpilloverCandidate & { score: number; reason: string })[]
+  neighbours: SpilloverCandidate[]
+}

@@ -1,16 +1,18 @@
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, BatteryCharging, Clock, Database, ExternalLink, Info, LineChart, MapPin, Navigation, Sparkles } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, BatteryCharging, Clock, Database, ExternalLink, Info, LineChart, MapPin, Navigation, Sparkles } from 'lucide-react'
 import { AppFooter, AppHeader } from '../components/layout/AppHeader'
 import { MapView } from '../components/map/MapView'
 import { AvailabilityPanel } from '../components/parking/Availability'
 import { FacilityCard } from '../components/parking/FacilityCard'
+import { OccupancyHistory } from '../components/parking/OccupancyHistory'
+import { PredictionPanel, SpilloverPanel } from '../components/parking/Prediction'
 import { TypeIcon } from '../components/parking/meta'
 import { ProvenanceBadge } from '../components/ui/Badges'
 import { buttonClass } from '../components/ui/Button'
 import { Card, EmptyState, ErrorState, Skeleton } from '../components/ui/primitives'
 import { api, ApiError, errorMessage } from '../lib/api'
-import { formatDate, formatDistance, VEHICLE_LABEL } from '../lib/format'
+import { directionsUrl, formatDate, formatDistance, VEHICLE_LABEL } from '../lib/format'
 import { useThresholds } from '../lib/hooks'
 import type { Facility, FacilityDetail } from '../lib/types'
 
@@ -63,7 +65,7 @@ export default function FacilityPage() {
   }
 
   const f = q.data.facility
-  const directions = `https://www.openstreetmap.org/directions?to=${f.latitude}%2C${f.longitude}#map=17/${f.latitude}/${f.longitude}`
+  const directions = directionsUrl(f.latitude, f.longitude)
 
   return (
     <Shell>
@@ -112,17 +114,29 @@ export default function FacilityPage() {
               </h2>
               <ProvenanceBadge kind="predicted" />
             </div>
-            <div className="mt-3 rounded-md border border-dashed border-ink-200 bg-ink-25 px-4 py-5 text-center">
-              <p className="text-sm font-medium text-ink-700">Prediction unavailable — insufficient historical data.</p>
-              <p className="mt-1 text-xs text-ink-500">Short-term forecasts need a recent occupancy history for this facility. None is recorded.</p>
+            <div className="mt-3">
+              <PredictionPanel facility={f} />
             </div>
           </Card>
+
+          {f.availabilityMode !== 'NONE' && (
+            <Card className="p-5">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-ink-900">
+                <AlertTriangle className="size-4 text-ink-400" /> Nearby parking pressure
+              </h2>
+              <div className="mt-3">
+                <SpilloverPanel facility={f} />
+              </div>
+            </Card>
+          )}
 
           <Card className="p-5">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-ink-900">
               <LineChart className="size-4 text-ink-400" /> Historical occupancy
             </h2>
-            <p className="mt-3 text-sm text-ink-500">No historical occupancy has been recorded for this facility.</p>
+            <div className="mt-3">
+              <OccupancyHistory facility={f} saturationThreshold={thresholds.saturation} />
+            </div>
           </Card>
 
           <Card className="p-5">

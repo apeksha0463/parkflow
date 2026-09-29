@@ -37,6 +37,27 @@ py -3.13 -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt   # 
 .venv/Scripts/python -m uvicorn service.app:app --reload --port 8000
 ```
 
+### Research pipeline and simulation demo
+
+```bash
+cd ml
+# ~720 MB download, ~1 h end to end on a laptop; see DATASET.md and ML_PIPELINE.md
+.venv/Scripts/python -m parkflow_ml.download
+.venv/Scripts/python -m parkflow_ml.ingest
+.venv/Scripts/python -m parkflow_ml.occupancy
+.venv/Scripts/python -m parkflow_ml.geo
+.venv/Scripts/python -m parkflow_ml.train     # models -> ml/artifacts, results -> ml/evaluation
+.venv/Scripts/python -m parkflow_ml.plots
+.venv/Scripts/python -m parkflow_ml.replay    # test-period replay data for the demo
+cd ..
+npm run db:seed -w apps/api
+npm run import:osm -w apps/api
+npm run db:seed:simulation -w apps/api        # labelled demo zones around Koramangala
+```
+
+With the ML service running, the API replays the demo zones (Simulation Mode) and serves real model predictions for them.
+Every other facility shows "Prediction unavailable — insufficient historical data."
+
 ## Tests
 
 ```bash
@@ -44,4 +65,4 @@ npm test                        # API + web
 cd ml && .venv/Scripts/python -m pytest -q
 ```
 
-See ARCHITECTURE.md, and (as milestones land) DATASET.md, ML_PIPELINE.md, API.md, TESTING.md, DEPLOYMENT.md, RESEARCH.md.
+See ARCHITECTURE.md, API.md, DATASET.md, ML_PIPELINE.md and RESEARCH.md (TESTING.md and DEPLOYMENT.md land with their milestones).

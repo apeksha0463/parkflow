@@ -53,7 +53,10 @@ describe('explore flow', () => {
     await user.type(screen.getByRole('combobox', { name: /search destination/i }), 'kora')
     await user.click(await screen.findByRole('option', { name: /koramangala/i }))
 
-    expect(await screen.findByRole('link', { name: 'Forum Parking' })).toHaveAttribute('href', '/parking/f1')
+    // In the explore list a card focuses the map; details and directions are explicit links.
+    expect(await screen.findByRole('button', { name: 'Show Forum Parking on the map' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Details' })).toHaveAttribute('href', '/parking/f1')
+    expect(screen.getByRole('link', { name: /directions/i }).getAttribute('href')).toContain('to=12.93%2C77.61')
     expect(parkingCalls[0].searchParams.get('lat')).toBe('12.9352')
     expect(parkingCalls[0].searchParams.get('radius')).toBe('2000')
     expect(screen.getByText('Availability currently unavailable.')).toBeInTheDocument()
@@ -86,7 +89,8 @@ describe('facility page', () => {
       if (u.pathname === '/api/parking/f1/neighbours') return { body: { radiusMeters: 800, method: 'x', items: [facility({ id: 'f2', displayName: 'Nearby Lot', name: 'Nearby Lot' })] } }
     })
     renderApp(<App />, { route: '/parking/f1' })
-    expect(await screen.findByRole('heading', { name: 'Mall parking near Koramangala' })).toBeInTheDocument()
+    // first render of this lazily loaded route (includes the chart library) can take over a second in CI
+    expect(await screen.findByRole('heading', { name: 'Mall parking near Koramangala' }, { timeout: 5000 })).toBeInTheDocument()
     expect(screen.getByText(/this label is derived/i)).toBeInTheDocument()
     expect(screen.getByText('Prediction unavailable — insufficient historical data.')).toBeInTheDocument()
     expect(screen.getAllByText('Availability currently unavailable.').length).toBeGreaterThan(0)
