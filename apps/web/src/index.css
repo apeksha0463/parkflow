@@ -88,3 +88,44 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------- Map (Leaflet) ---------- */
+.leaflet-container {
+  font-family: var(--font-sans);
+  background: var(--color-ink-50);
+}
+.leaflet-control-attribution {
+  font-size: 10px;
+}
+.pf-marker,
+.pf-cluster,
+.pf-destination {
+  background: transparent;
+  border: 0;
+}
+.pf-marker svg {
+  filter: drop-shadow(0 1px 2px rgb(17 23 32 / 0.25));
+  transition: transform 120ms ease;
+}
+.pf-marker:hover svg {
+  transform: scale(1.12);
+}
+.pf-cluster-inner {
+  display: grid;
+  place-items: center;
+  border-radius: 9999px;
+  background: var(--color-ink-800);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 4px rgb(29 36 48 / 0.18), 0 2px 6px rgb(17 23 32 / 0.2);
+}
+.pf-destination-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: var(--color-brand-600);
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 6px rgb(47 91 234 / 0.2), 0 2px 6px rgb(17 23 32 / 0.3);
+}

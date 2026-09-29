@@ -16,6 +16,16 @@ const sizes: Record<Size, string> = {
   lg: 'h-12 px-5 text-base gap-2',
 }
 
+/** Button styling for non-button elements (e.g. router links styled as buttons). */
+export function buttonClass(variant: Variant = 'primary', size: Size = 'md', className?: string) {
+  return cn(
+    'inline-flex items-center justify-center rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
+    variants[variant],
+    sizes[size],
+    className,
+  )
+}
+
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant
   size?: Size
@@ -31,12 +41,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={cn(
-        'inline-flex items-center justify-center rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
-        variants[variant],
-        sizes[size],
-        className,
-      )}
+      className={buttonClass(variant, size, className)}
       {...rest}
     >
       {loading && <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />}

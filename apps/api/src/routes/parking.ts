@@ -180,18 +180,27 @@ parkingRouter.get('/', async (req, res) => {
   res.json(await listFacilities(ListQuery.parse(req.query)));
 });
 
-const MapQuery = z.object({ bbox: bboxSchema, types: csvEnum(ParkingTypeEnum).optional() });
+/** Map markers accept the same filters as the list (minus location/sort/paging), so both views agree. */
+const MapQuery = z.object({
+  bbox: bboxSchema,
+  types: csvEnum(ParkingTypeEnum).optional(),
+  vehicleType: z.enum(VehicleTypeEnum).optional(),
+  ev: bool.optional(),
+  free: bool.optional(),
+  openNow: bool.optional(),
+  hasAvailability: bool.optional(),
+});
 
 /** Compact markers for the map viewport (clustered client-side). */
 parkingRouter.get('/map', async (req, res) => {
-  const q = MapQuery.parse(req.query);
-  const [w, s, e, n] = q.bbox;
-  const typeFilter = q.types ? Prisma.sql`AND f.type::text = ANY(${q.types})` : Prisma.empty;
-  const rows = await prisma.$queryRaw<{ id: string; latitude: number; longitude: number; type: ParkingType; availabilityMode: 'NONE' | 'LIVE' | 'SIMULATION'; isDemo: boolean }[]>`
-    SELECT f.id, f.latitude, f.longitude, f.type, f."availabilityMode", f."isDemo"
+  const mq = MapQuery.parse(req.query);
+  const q: ListQuery = { ...ListQuery.parse({}), ...mq };
+  let rows = await prisma.$queryRaw<{ id: string; latitude: number; longitude: number; type: ParkingType; availabilityMode: 'NONE' | 'LIVE' | 'SIMULATION'; isDemo: boolean; operatingHours: string | null }[]>`
+    SELECT f.id, f.latitude, f.longitude, f.type, f."availabilityMode", f."isDemo", f."operatingHours"
       FROM "ParkingFacility" f
-     WHERE f.location && ST_MakeEnvelope(${w}, ${s}, ${e}, ${n}, 4326)::geography ${typeFilter}
+     WHERE ${whereClauses(q, null)}
      LIMIT ${MAX_CANDIDATES}`;
+  if (q.openNow) rows = rows.filter((r) => isOpenNow(r.operatingHours) === true);
   const settings = await getSettings();
   const availability = await availabilityFor(rows.filter((r) => r.availabilityMode !== 'NONE'), settings.staleAfterMinutes);
   res.json({

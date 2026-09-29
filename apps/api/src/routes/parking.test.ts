@@ -137,6 +137,16 @@ describe('map, detail, neighbours, areas', () => {
     expect(res.body.items[0]).toHaveProperty('availabilityState');
   });
 
+  it('applies the same filters to map markers as to the list', async () => {
+    await fixtures();
+    const bbox = [ORIGIN.lng - 0.05, ORIGIN.lat - 0.05, ORIGIN.lng + 0.05, ORIGIN.lat + 0.05].join(',');
+    const ids = async (q: Record<string, string>) =>
+      (await request(app).get('/api/parking/map').query({ bbox, ...q })).body.items.map((m: { id: string }) => m.id).sort();
+    expect(await ids({ ev: 'true' })).toEqual(['near']);
+    expect(await ids({ openNow: 'true' })).toEqual(['near']);
+    expect(await ids({ types: 'MALL' })).toEqual(['far']);
+  });
+
   it('returns facility detail with zones and 404 for unknown ids', async () => {
     await fixtures();
     const res = await request(app).get('/api/parking/near');

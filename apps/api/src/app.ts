@@ -13,6 +13,7 @@ import { adminRouter } from './routes/admin.js';
 import { getSettings } from './services/settings.js';
 import { areasRouter, parkingRouter } from './routes/parking.js';
 import { searchRouter } from './routes/search.js';
+import { statsRouter } from './routes/stats.js';
 
 export function createApp() {
   const app = express();
@@ -53,6 +54,7 @@ export function createApp() {
   api.use('/parking', parkingRouter);
   api.use('/areas', areasRouter);
   api.use('/search', searchRouter);
+  api.use('/stats', statsRouter);
   api.use('/admin', adminRouter);
 
   app.use('/api', api);
