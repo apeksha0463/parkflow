@@ -14,6 +14,8 @@ import { getSettings } from './services/settings.js';
 import { areasRouter, parkingRouter } from './routes/parking.js';
 import { searchRouter } from './routes/search.js';
 import { statsRouter } from './routes/stats.js';
+import { spilloverRouter } from './routes/spillover.js';
+import { analyticsRouter } from './routes/analytics.js';
 
 export function createApp() {
   const app = express();
@@ -55,6 +57,8 @@ export function createApp() {
   api.use('/areas', areasRouter);
   api.use('/search', searchRouter);
   api.use('/stats', statsRouter);
+  api.use('/spillover', spilloverRouter);
+  api.use('/analytics', analyticsRouter);
   api.use('/admin', adminRouter);
 
   app.use('/api', api);

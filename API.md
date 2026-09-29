@@ -49,6 +49,8 @@ Result item: `{ id, label, sublabel, latitude, longitude, kind: 'locality' | 'pl
 | GET | `/api/parking/map?bbox=w,s,e,n&types=` | Compact markers `{id, latitude, longitude, type, isDemo, availabilityState, occupancy}` for client-side clustering |
 | GET | `/api/parking/:id` | Facility detail including zones |
 | GET | `/api/parking/:id/neighbours?radius=&limit=` | Facilities within `radius` metres (default: admin `neighbourRadiusMeters`), nearest first |
+| GET | `/api/parking/:id/occupancy?hours=24` | Recorded occupancy snapshots (1–168 h) per zone, each with `sourceType`. Empty for facilities without an availability source. |
+| GET | `/api/parking/:id/predictions` | Short-term predicted occupancy (see below). Always 200 with a `status`. |
 | GET | `/api/areas/:id` | Locality |
 | GET | `/api/areas/:id/parking` | Same as `/api/parking`, centred on the locality (default radius 1500 m) |
 
@@ -71,5 +73,45 @@ Result item: `{ id, label, sublabel, latitude, longitude, kind: 'locality' | 'pl
 - `HISTORICAL_ONLY`: no current source; the numbers are historical.
 - `UNAVAILABLE`: no data.
 
-Spillover, prediction, analytics, booking and simulation endpoints are documented as they land.
+## Predictions
+`GET /api/parking/:id/predictions`:
+```jsonc
+{
+  "status": "AVAILABLE",            // or INSUFFICIENT_DATA | STALE | SERVICE_UNAVAILABLE (then zones = [] and message is set)
+  "message": null,                  // e.g. "Prediction unavailable — insufficient historical data."
+  "provenance": "PREDICTED",
+  "model": { "id": "spatial_temporal-hgb-v1", "featureSet": "spatial_temporal", "trainingDataset": "melbourne-on-street-sensors-2019", "trainedAt": "…" },
+  "zones": [{
+    "zoneId": "…", "zoneName": "…", "basedOn": "2026-09-29T10:05:00.000Z", "isSimulated": true,
+    "currentOccupancy": 0.72, "currentState": "NORMAL", "neighboursUsed": 4,
+    "predictions": [{ "horizonMinutes": 15, "targetTime": "…", "predictedOccupancy": 0.84, "pressureLevel": "APPROACHING_SATURATION" }]
+  }]
+}
+```
+- **When the ML service is called:** only when the facility has an availability source, a snapshot no older than `staleAfterMinutes`, and a known capacity.
+- **Neighbours:** zones within the model's training radius, taken from the model metadata.
+- **Storage:** predictions are stored and reused for the same base time.
+- **What's never returned:** confidence values (none are computed), and horizons the model doesn't have.
+
+## Spillover
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/spillover/events?active=&facilityId=&simulated=&page=&pageSize=` | Saturation events derived from snapshots with the admin thresholds. `isSimulated` marks replay data. |
+| GET | `/api/spillover/predictions?facilityId=` | Neighbourhood analysis around a facility. `origin` gives its availability, pressure level and active event. `spilloverContext` is true when the origin is at or near saturation. `warnings` are neighbours with predicted occupancy ≥ the approaching threshold and above their current value; the message uses hedged wording. `alternatives` are ranked by predicted (else current) occupancy plus 0.1 per km, and exclude closed, saturated or no-data facilities; each has a `reason`. `neighbours` lists every neighbour with its prediction status. |
+
+## Analytics
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/analytics/model-performance` | — | `registry` (model metadata), `offline` (the research evaluation `results.json`, unmodified) and `online` (served predictions' MAE/RMSE once actuals exist, split by `isSimulated`). `mlService: "unavailable"` with nulls when the ML service is down. |
+| GET | `/api/analytics/prediction-errors?horizon=&page=&pageSize=` | admin | Individual served predictions with actual occupancy and absolute error |
+
+## ML service (internal; the frontend never calls it)
+| Method | Path | Description |
+|---|---|---|
+| GET | `/health` | `{status, modelsLoaded, activeModelVersion}` |
+| GET | `/models` | `registry.json` as written by training (503 if absent) |
+| GET | `/evaluation` | `ml/evaluation/results.json` (503 if absent) |
+| POST | `/predict` | `{zoneId, timestamp (local wall clock), history[], observedBays, neighbours[{distanceM, history[]}], horizons?, model?, threshold?}` → predictions. `422 INSUFFICIENT_HISTORY` / `503 NO_MODEL` instead of guessing. |
+
+Booking endpoints are documented when that milestone lands.
 

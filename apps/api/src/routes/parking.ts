@@ -5,6 +5,7 @@ import { HttpError, notFound } from '../lib/errors.js';
 import { Prisma, type ParkingType } from '../generated/prisma/client.js';
 import { ParkingType as ParkingTypeEnum, VehicleType as VehicleTypeEnum } from '../generated/prisma/enums.js';
 import { getSettings } from '../services/settings.js';
+import { facilityPredictions } from '../services/predictions.js';
 import { availabilityFor, displayName, isOpenNow, TYPE_LABEL, UNAVAILABLE_SUMMARY, type AvailabilitySummary } from '../services/facilities.js';
 
 const MAX_CANDIDATES = 5000;
@@ -263,6 +264,34 @@ parkingRouter.get('/:id/neighbours', async (req, res) => {
     radiusMeters: radius,
     method: 'Straight-line geographic distance (PostGIS ST_DWithin on WGS84 geography)',
     items: rows.map((r) => toFacilityDto(byId.get(r.id)!, { distanceMeters: r.distance, availability: availability.get(r.id)! })),
+  });
+});
+
+/** Short-term occupancy predictions. Always returns a status; predictions only when real inputs exist. */
+parkingRouter.get('/:id/predictions', async (req, res) => {
+  const result = await facilityPredictions(req.params.id);
+  if (!result) throw notFound('Parking facility');
+  res.json(result);
+});
+
+const OccupancyQuery = z.object({ hours: z.coerce.number().int().min(1).max(24 * 7).default(24) });
+
+/** Observed occupancy history (snapshots) with provenance. Empty when the facility has no availability source. */
+parkingRouter.get('/:id/occupancy', async (req, res) => {
+  const { hours } = OccupancyQuery.parse(req.query);
+  const f = await prisma.parkingFacility.findUnique({ where: { id: req.params.id }, select: { id: true, availabilityMode: true, zones: { select: { id: true, name: true } } } });
+  if (!f) throw notFound('Parking facility');
+  const since = new Date(Date.now() - hours * 3_600_000);
+  const snaps = await prisma.occupancySnapshot.findMany({
+    where: { zoneId: { in: f.zones.map((z) => z.id) }, observedAt: { gte: since, lte: new Date() } },
+    select: { zoneId: true, observedAt: true, occupied: true, available: true, capacity: true, occupancy: true, sourceType: true },
+    orderBy: { observedAt: 'asc' },
+    take: 5000,
+  });
+  res.json({
+    availabilityMode: f.availabilityMode,
+    hours,
+    zones: f.zones.map((z) => ({ ...z, points: snaps.filter((s) => s.zoneId === z.id).map(({ zoneId: _z, ...p }) => p) })),
   });
 });
 
