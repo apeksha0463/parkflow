@@ -221,7 +221,8 @@ describe('spillover', () => {
     expect(res.body.warnings.map((w: any) => w.facilityId)).toEqual(['b']);
     expect(res.body.warnings[0].message).toMatch(/^Parking pressure is likely to increase around b: predicted occupancy 86% in 15 min/);
     expect(res.body.warnings[0].message).not.toMatch(/will/i);
-    expect(res.body.alternatives[0]).toMatchObject({ id: 'c' });
+    // b is warned about (pressure predicted to rise), so it must not also be recommended as an alternative
+    expect(res.body.alternatives.map((a: any) => a.id)).toEqual(['c']);
     expect(res.body.alternatives[0].reason).toMatch(/14 spaces currently available, predicted occupancy 33% in 15 min, 0\.7 km away/);
     expect(res.body.neighbours.find((n: any) => n.id === 'osm').predictionStatus).toBe('INSUFFICIENT_DATA');
 

@@ -167,6 +167,7 @@ export async function spilloverAround(facilityId: string) {
       horizonMinutes: c.predicted!.horizonMinutes,
       message: `Parking pressure is likely to increase around ${c.displayName}: predicted occupancy ${pct(c.predicted!.predictedOccupancy)} in ${c.predicted!.horizonMinutes} min (currently ${pct(c.availability.occupancy!)}).`,
     }));
+  const warnedIds = new Set(warnings.map((w) => w.facilityId));
 
   return {
     facilityId,
@@ -176,7 +177,8 @@ export async function spilloverAround(facilityId: string) {
     // Only raised when the origin is at/near saturation — otherwise there is no spillover context.
     spilloverContext: originPressure === 'SATURATED' || originPressure === 'APPROACHING_SATURATION',
     warnings,
-    alternatives: rankAlternatives(candidates, s).slice(0, 5),
+    // A zone we warn about (pressure predicted to rise) is never also recommended as an alternative.
+    alternatives: rankAlternatives(candidates.filter((c) => !warnedIds.has(c.id)), s).slice(0, 5),
     neighbours: candidates,
     provenance: { current: originAvail.state, predictions: 'PREDICTED' },
   };
