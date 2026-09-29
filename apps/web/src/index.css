@@ -1,0 +1,90 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+
+/*
+ * ParkFlow design system tokens.
+ * Status colours are semantic — use them only for their meaning (see src/lib/status.ts).
+ */
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+
+  /* Brand */
+  --color-brand-50: #eef3ff;
+  --color-brand-100: #dbe5ff;
+  --color-brand-500: #2f5bea;
+  --color-brand-600: #2349d1;
+  --color-brand-700: #1c3aa8;
+
+  /* Neutrals (ink scale) */
+  --color-ink-0: #ffffff;
+  --color-ink-25: #fafbfc;
+  --color-ink-50: #f4f6f9;
+  --color-ink-100: #e9edf2;
+  --color-ink-200: #d7dde5;
+  --color-ink-300: #b6c0cc;
+  --color-ink-400: #8793a3;
+  --color-ink-500: #5f6b7c;
+  --color-ink-600: #455061;
+  --color-ink-700: #2f3846;
+  --color-ink-800: #1d2430;
+  --color-ink-900: #111720;
+
+  /* Semantic parking status */
+  --color-status-available: #15935a;
+  --color-status-available-bg: #e6f6ee;
+  --color-status-moderate: #b7791f;
+  --color-status-moderate-bg: #fdf4e3;
+  --color-status-nearly-full: #d9580d;
+  --color-status-nearly-full-bg: #fff0e6;
+  --color-status-full: #cf2e3a;
+  --color-status-full-bg: #fdecee;
+  --color-status-unknown: #6b7584;
+  --color-status-unknown-bg: #eef0f3;
+  /* Predictions are visually distinct from observations */
+  --color-status-predicted: #6d45d6;
+  --color-status-predicted-bg: #f1ecfd;
+  /* Simulation/demo data label */
+  --color-status-simulated: #0f7c8c;
+  --color-status-simulated-bg: #e3f5f7;
+
+  /* Type scale */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+
+  /* Radius & elevation */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --shadow-card: 0 1px 2px rgb(17 23 32 / 0.05), 0 1px 3px rgb(17 23 32 / 0.06);
+  --shadow-pop: 0 8px 24px rgb(17 23 32 / 0.12), 0 2px 6px rgb(17 23 32 / 0.06);
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    color: var(--color-ink-800);
+    background: var(--color-ink-25);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  body {
+    min-height: 100dvh;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

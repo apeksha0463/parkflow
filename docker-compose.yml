@@ -1,0 +1,18 @@
+# Local development only. Production uses managed PostgreSQL + PostGIS (see DEPLOYMENT.md).
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: parkflow
+      POSTGRES_PASSWORD: parkflow_dev
+      POSTGRES_DB: parkflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parkflow"]
+      interval: 5s
+      retries: 10
+volumes:
+  pgdata:

@@ -1,0 +1,20 @@
+{
+  "name": "parkflow",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "apps/api"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w apps/web",
+    "dev:api": "npm run dev -w apps/api",
+    "build": "npm run build -w apps/api && npm run build -w apps/web",
+    "test": "npm test -w apps/api && npm test -w apps/web",
+    "lint": "npm run lint -w apps/web",
+    "db:up": "docker compose up -d db"
+  },
+  "optionalDependencies": {
+    "@rolldown/binding-win32-x64-msvc": "1.2.11",
+    "@rolldown/binding-linux-x64-gnu": "1.2.11"
+  }
+}
