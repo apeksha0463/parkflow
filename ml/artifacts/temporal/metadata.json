@@ -1,0 +1,175 @@
+{
+  "id": "temporal-hgb-v1",
+  "feature_set": "temporal",
+  "algorithm": "HistGradientBoostingRegressor (predicts occupancy change)",
+  "training_dataset": "melbourne-on-street-sensors-2019",
+  "trained_at": "2026-09-29T16:06:59+00:00",
+  "feature_version": "v1",
+  "features": [
+    "occ_t",
+    "occ_lag1",
+    "occ_lag2",
+    "occ_lag3",
+    "occ_lag6",
+    "occ_lag12",
+    "occ_lag1w",
+    "diff1",
+    "diff3",
+    "diff6",
+    "roll_mean_6",
+    "roll_mean_12",
+    "observed_bays",
+    "tod_sin",
+    "tod_cos",
+    "dow",
+    "is_weekend"
+  ],
+  "hyper_parameters": {
+    "learning_rate": 0.1,
+    "max_iter": 300,
+    "early_stopping": false,
+    "random_state": 0,
+    "max_leaf_nodes": 63
+  },
+  "horizons_minutes": [
+    5,
+    10,
+    15,
+    30
+  ],
+  "files": {
+    "5": "temporal/hgb_h5.joblib",
+    "10": "temporal/hgb_h10.joblib",
+    "15": "temporal/hgb_h15.joblib",
+    "30": "temporal/hgb_h30.joblib"
+  },
+  "test_metrics": [
+    {
+      "horizon_min": 5,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "all",
+      "n": 2209742,
+      "mae": 0.054794080975065385,
+      "rmse": 0.08597812986131122,
+      "r2": 0.9074024035114467
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "all",
+      "n": 2209033,
+      "mae": 0.07198288848844185,
+      "rmse": 0.10546669891571422,
+      "r2": 0.860363319460755
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "all",
+      "n": 2208421,
+      "mae": 0.08259497488908484,
+      "rmse": 0.11766657587072207,
+      "r2": 0.8258182729968291
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "all",
+      "n": 2206813,
+      "mae": 0.10277008511316213,
+      "rmse": 0.1406558494079954,
+      "r2": 0.7496604963379507
+    }
+  ],
+  "config": {
+    "dataset": "melbourne-on-street-sensors-2019",
+    "feature_version": "v1",
+    "bucket_minutes": 5,
+    "horizons_minutes": [
+      5,
+      10,
+      15,
+      30
+    ],
+    "saturation_threshold": 0.9,
+    "approaching_margin": 0.1,
+    "neighbour_radius_m": 200,
+    "min_observed_bays": 4,
+    "experiment_hours": [
+      7,
+      22
+    ],
+    "train_stride": 3,
+    "hgb_fixed": {
+      "learning_rate": 0.1,
+      "max_iter": 300,
+      "early_stopping": false,
+      "random_state": 0
+    },
+    "hgb_grid": [
+      {
+        "max_leaf_nodes": 31
+      },
+      {
+        "max_leaf_nodes": 63
+      }
+    ],
+    "selection_horizon": 15,
+    "features": {
+      "temporal": [
+        "occ_t",
+        "occ_lag1",
+        "occ_lag2",
+        "occ_lag3",
+        "occ_lag6",
+        "occ_lag12",
+        "occ_lag1w",
+        "diff1",
+        "diff3",
+        "diff6",
+        "roll_mean_6",
+        "roll_mean_12",
+        "observed_bays",
+        "tod_sin",
+        "tod_cos",
+        "dow",
+        "is_weekend"
+      ],
+      "spatial_temporal": [
+        "occ_t",
+        "occ_lag1",
+        "occ_lag2",
+        "occ_lag3",
+        "occ_lag6",
+        "occ_lag12",
+        "occ_lag1w",
+        "diff1",
+        "diff3",
+        "diff6",
+        "roll_mean_6",
+        "roll_mean_12",
+        "observed_bays",
+        "tod_sin",
+        "tod_cos",
+        "dow",
+        "is_weekend",
+        "nb_count",
+        "nb_valid",
+        "nb_mean_occ",
+        "nb_wmean_occ",
+        "nb_max_occ",
+        "nb_min_occ",
+        "nb_mean_diff1",
+        "nb_mean_diff3",
+        "nb_n_saturated",
+        "nb_n_approaching",
+        "nb_n_recent_onset",
+        "nb_mean_dist_m"
+      ]
+    }
+  }
+}

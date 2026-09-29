@@ -1,0 +1,1515 @@
+{
+  "generated_at": "2026-09-29T16:06:59+00:00",
+  "config": {
+    "dataset": "melbourne-on-street-sensors-2019",
+    "feature_version": "v1",
+    "bucket_minutes": 5,
+    "horizons_minutes": [
+      5,
+      10,
+      15,
+      30
+    ],
+    "saturation_threshold": 0.9,
+    "approaching_margin": 0.1,
+    "neighbour_radius_m": 200,
+    "min_observed_bays": 4,
+    "experiment_hours": [
+      7,
+      22
+    ],
+    "train_stride": 3,
+    "hgb_fixed": {
+      "learning_rate": 0.1,
+      "max_iter": 300,
+      "early_stopping": false,
+      "random_state": 0
+    },
+    "hgb_grid": [
+      {
+        "max_leaf_nodes": 31
+      },
+      {
+        "max_leaf_nodes": 63
+      }
+    ],
+    "selection_horizon": 15,
+    "features": {
+      "temporal": [
+        "occ_t",
+        "occ_lag1",
+        "occ_lag2",
+        "occ_lag3",
+        "occ_lag6",
+        "occ_lag12",
+        "occ_lag1w",
+        "diff1",
+        "diff3",
+        "diff6",
+        "roll_mean_6",
+        "roll_mean_12",
+        "observed_bays",
+        "tod_sin",
+        "tod_cos",
+        "dow",
+        "is_weekend"
+      ],
+      "spatial_temporal": [
+        "occ_t",
+        "occ_lag1",
+        "occ_lag2",
+        "occ_lag3",
+        "occ_lag6",
+        "occ_lag12",
+        "occ_lag1w",
+        "diff1",
+        "diff3",
+        "diff6",
+        "roll_mean_6",
+        "roll_mean_12",
+        "observed_bays",
+        "tod_sin",
+        "tod_cos",
+        "dow",
+        "is_weekend",
+        "nb_count",
+        "nb_valid",
+        "nb_mean_occ",
+        "nb_wmean_occ",
+        "nb_max_occ",
+        "nb_min_occ",
+        "nb_mean_diff1",
+        "nb_mean_diff3",
+        "nb_n_saturated",
+        "nb_n_approaching",
+        "nb_n_recent_onset",
+        "nb_mean_dist_m"
+      ]
+    }
+  },
+  "splits": {
+    "train": {
+      "range": [
+        "2019-01-01",
+        "2019-08-31"
+      ],
+      "samples": 2659172,
+      "samples_with_15min_target": 2655562,
+      "post_neighbour_saturation_samples": 312269
+    },
+    "validation": {
+      "range": [
+        "2019-09-01",
+        "2019-10-31"
+      ],
+      "samples": 2160057,
+      "samples_with_15min_target": 2157172,
+      "post_neighbour_saturation_samples": 258315
+    },
+    "test": {
+      "range": [
+        "2019-11-01",
+        "2019-12-31"
+      ],
+      "samples": 2210667,
+      "samples_with_15min_target": 2208421,
+      "post_neighbour_saturation_samples": 250385
+    }
+  },
+  "selection": {
+    "temporal": {
+      "params": {
+        "max_leaf_nodes": 63
+      },
+      "validation_mae": 0.08635495690852947
+    },
+    "spatial_temporal": {
+      "params": {
+        "max_leaf_nodes": 63
+      },
+      "validation_mae": 0.08498343080120511
+    }
+  },
+  "zones_in_experiment": 218,
+  "zones_with_neighbours": 207,
+  "saturation_events": {
+    "events": 160824,
+    "zones_with_events": 216,
+    "events_by_hour": {
+      "0": 2518,
+      "1": 1761,
+      "2": 1228,
+      "3": 850,
+      "4": 742,
+      "5": 1050,
+      "6": 2917,
+      "7": 4164,
+      "8": 4714,
+      "9": 9606,
+      "10": 13707,
+      "11": 13231,
+      "12": 12556,
+      "13": 11970,
+      "14": 10107,
+      "15": 8476,
+      "16": 7014,
+      "17": 7988,
+      "18": 13210,
+      "19": 11203,
+      "20": 7870,
+      "21": 5675,
+      "22": 4548,
+      "23": 3719
+    },
+    "median_duration_min": 10.0
+  },
+  "metrics": [
+    {
+      "horizon_min": 5,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "all",
+      "n": 2209742,
+      "mae": 0.04825435700054649,
+      "rmse": 0.09120856515588219,
+      "r2": 0.8957934608377669
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "post_neighbour_saturation",
+      "n": 250280,
+      "mae": 0.055709693108588414,
+      "rmse": 0.0979543387852104,
+      "r2": 0.8489981611944207
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "target_approaching_or_saturated",
+      "n": 605393,
+      "mae": 0.041333907793019146,
+      "rmse": 0.08337865432948763,
+      "r2": 0.310278614000396
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "has_neighbours",
+      "n": 2100787,
+      "mae": 0.04849247789049399,
+      "rmse": 0.09133562604512914,
+      "r2": 0.8954954292271449
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "all",
+      "n": 2209742,
+      "mae": 0.055466254137844624,
+      "rmse": 0.08725866793907985,
+      "r2": 0.9046236094010163
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "post_neighbour_saturation",
+      "n": 250280,
+      "mae": 0.06155091170844483,
+      "rmse": 0.0932031346558047,
+      "r2": 0.8632913737638322
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "target_approaching_or_saturated",
+      "n": 605393,
+      "mae": 0.048939149414141625,
+      "rmse": 0.07748771884695448,
+      "r2": 0.40429714599441624
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "has_neighbours",
+      "n": 2100787,
+      "mae": 0.05575525164984414,
+      "rmse": 0.08743548286386767,
+      "r2": 0.9042298226735926
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "all",
+      "n": 2209742,
+      "mae": 0.054794080975065385,
+      "rmse": 0.08597812986131122,
+      "r2": 0.9074024035114467
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "post_neighbour_saturation",
+      "n": 250280,
+      "mae": 0.06116181282533168,
+      "rmse": 0.09156378969070537,
+      "r2": 0.8680582015461379
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "target_approaching_or_saturated",
+      "n": 605393,
+      "mae": 0.05051408695769146,
+      "rmse": 0.07619483810012324,
+      "r2": 0.42400988512578985
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "has_neighbours",
+      "n": 2100787,
+      "mae": 0.05513212822726,
+      "rmse": 0.08618634324799751,
+      "r2": 0.9069467008652579
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "all",
+      "n": 2209742,
+      "mae": 0.0553913938812832,
+      "rmse": 0.08710025145359812,
+      "r2": 0.9049696031624239
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "post_neighbour_saturation",
+      "n": 250280,
+      "mae": 0.061164196713540876,
+      "rmse": 0.09288537366988522,
+      "r2": 0.8642219565399902
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "target_approaching_or_saturated",
+      "n": 605393,
+      "mae": 0.04880411452404959,
+      "rmse": 0.0774018896607548,
+      "r2": 0.40561607435151226
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "has_neighbours",
+      "n": 2100787,
+      "mae": 0.055639884320257765,
+      "rmse": 0.08726313183036223,
+      "r2": 0.9046070109790432
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "all",
+      "n": 2209742,
+      "mae": 0.05431149177973098,
+      "rmse": 0.08526125190059611,
+      "r2": 0.9089401070201935
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "post_neighbour_saturation",
+      "n": 250280,
+      "mae": 0.06100821299610039,
+      "rmse": 0.09076024202012709,
+      "r2": 0.8703638359471161
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "target_approaching_or_saturated",
+      "n": 605393,
+      "mae": 0.05005564198293409,
+      "rmse": 0.07557041627601374,
+      "r2": 0.4334117576124723
+    },
+    {
+      "horizon_min": 5,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "has_neighbours",
+      "n": 2100787,
+      "mae": 0.05460864726745874,
+      "rmse": 0.08546723777402337,
+      "r2": 0.9084930242680873
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "all",
+      "n": 2209033,
+      "mae": 0.06701949719204012,
+      "rmse": 0.11441999688614282,
+      "r2": 0.835648877890762
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "post_neighbour_saturation",
+      "n": 250201,
+      "mae": 0.0752227573370094,
+      "rmse": 0.1216947055826885,
+      "r2": 0.7650543500380044
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "target_approaching_or_saturated",
+      "n": 605243,
+      "mae": 0.05718744083154071,
+      "rmse": 0.10506409236007573,
+      "r2": 0.14675028518994626
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "has_neighbours",
+      "n": 2100121,
+      "mae": 0.06742342463197439,
+      "rmse": 0.11474672429353222,
+      "r2": 0.8347017711606733
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "all",
+      "n": 2209033,
+      "mae": 0.0737785260381587,
+      "rmse": 0.10799311537474093,
+      "r2": 0.8535933005841421
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "post_neighbour_saturation",
+      "n": 250201,
+      "mae": 0.07974223810418488,
+      "rmse": 0.1139494620149779,
+      "r2": 0.7940088330247284
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "target_approaching_or_saturated",
+      "n": 605243,
+      "mae": 0.06441548302794847,
+      "rmse": 0.09527853939098212,
+      "r2": 0.29828993255657044
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "has_neighbours",
+      "n": 2100121,
+      "mae": 0.07419787351952066,
+      "rmse": 0.10835896792564678,
+      "r2": 0.8525932649341854
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "all",
+      "n": 2209033,
+      "mae": 0.07198288848844185,
+      "rmse": 0.10546669891571422,
+      "r2": 0.860363319460755
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "post_neighbour_saturation",
+      "n": 250201,
+      "mae": 0.07786062359437095,
+      "rmse": 0.11062295386723112,
+      "r2": 0.805860216267442
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "target_approaching_or_saturated",
+      "n": 605243,
+      "mae": 0.06494978840622156,
+      "rmse": 0.09280295679794963,
+      "r2": 0.33428069250909664
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "has_neighbours",
+      "n": 2100121,
+      "mae": 0.07246335684261322,
+      "rmse": 0.10585572347885286,
+      "r2": 0.8593252031458924
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "all",
+      "n": 2209033,
+      "mae": 0.07353605193831922,
+      "rmse": 0.1076443786368957,
+      "r2": 0.8545373414341013
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "post_neighbour_saturation",
+      "n": 250201,
+      "mae": 0.07890650177715765,
+      "rmse": 0.11323913210424259,
+      "r2": 0.7965690140014088
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "target_approaching_or_saturated",
+      "n": 605243,
+      "mae": 0.06406429143840864,
+      "rmse": 0.09502892219184345,
+      "r2": 0.3019618917649636
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "has_neighbours",
+      "n": 2100121,
+      "mae": 0.07388637826972498,
+      "rmse": 0.10797908777032314,
+      "r2": 0.85362499749396
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "all",
+      "n": 2209033,
+      "mae": 0.07111557666706575,
+      "rmse": 0.1040803170544124,
+      "r2": 0.8640102975885993
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "post_neighbour_saturation",
+      "n": 250201,
+      "mae": 0.07701865203037529,
+      "rmse": 0.10899928544282658,
+      "r2": 0.8115173663440012
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "target_approaching_or_saturated",
+      "n": 605243,
+      "mae": 0.06417261530239628,
+      "rmse": 0.09170470947912555,
+      "r2": 0.34994395020714053
+    },
+    {
+      "horizon_min": 10,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "has_neighbours",
+      "n": 2100121,
+      "mae": 0.07157368191572833,
+      "rmse": 0.10446795787866107,
+      "r2": 0.8629895105491143
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "all",
+      "n": 2208421,
+      "mae": 0.07955012348012568,
+      "rmse": 0.12963386624797243,
+      "r2": 0.7885862115309801
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "post_neighbour_saturation",
+      "n": 250132,
+      "mae": 0.08752429189393457,
+      "rmse": 0.13664668248602155,
+      "r2": 0.7021417387364988
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "target_approaching_or_saturated",
+      "n": 605093,
+      "mae": 0.06762291396635602,
+      "rmse": 0.11925309544924574,
+      "r2": 0.06249579677862638
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "has_neighbours",
+      "n": 2099536,
+      "mae": 0.08007876392077419,
+      "rmse": 0.13013157769624387,
+      "r2": 0.7869574595590729
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "all",
+      "n": 2208421,
+      "mae": 0.08562736703927509,
+      "rmse": 0.121439450609782,
+      "r2": 0.8144692292483304
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "post_neighbour_saturation",
+      "n": 250132,
+      "mae": 0.09101704942202822,
+      "rmse": 0.12698246127151472,
+      "r2": 0.7427834276093725
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "target_approaching_or_saturated",
+      "n": 605093,
+      "mae": 0.07422951529080171,
+      "rmse": 0.10679031753249274,
+      "r2": 0.2482080733847064
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "has_neighbours",
+      "n": 2099536,
+      "mae": 0.08612192281667413,
+      "rmse": 0.12194179457170766,
+      "r2": 0.8129291557920587
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "all",
+      "n": 2208421,
+      "mae": 0.08259497488908484,
+      "rmse": 0.11766657587072207,
+      "r2": 0.8258182729968291
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "post_neighbour_saturation",
+      "n": 250132,
+      "mae": 0.08758664822302835,
+      "rmse": 0.12198723766676643,
+      "r2": 0.7626221131292309
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "target_approaching_or_saturated",
+      "n": 605093,
+      "mae": 0.07360349732416283,
+      "rmse": 0.10331070309088693,
+      "r2": 0.29640209727831235
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "has_neighbours",
+      "n": 2099536,
+      "mae": 0.08314882335633678,
+      "rmse": 0.11816494294531783,
+      "r2": 0.8243378308995553
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "all",
+      "n": 2208421,
+      "mae": 0.08522487071164013,
+      "rmse": 0.12091945858466101,
+      "r2": 0.8160546773612866
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "post_neighbour_saturation",
+      "n": 250132,
+      "mae": 0.08980713335003468,
+      "rmse": 0.1259406675253945,
+      "r2": 0.7469866440774457
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "target_approaching_or_saturated",
+      "n": 605093,
+      "mae": 0.07369700308518162,
+      "rmse": 0.10639835751712408,
+      "r2": 0.25371665512754227
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "has_neighbours",
+      "n": 2099536,
+      "mae": 0.08562633490692725,
+      "rmse": 0.12137379183552863,
+      "r2": 0.8146678423629997
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "all",
+      "n": 2208421,
+      "mae": 0.08128314539835127,
+      "rmse": 0.11554987714604578,
+      "r2": 0.8320286018122018
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "post_neighbour_saturation",
+      "n": 250132,
+      "mae": 0.0861529559990619,
+      "rmse": 0.1195251941450333,
+      "r2": 0.77210731726397
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "target_approaching_or_saturated",
+      "n": 605093,
+      "mae": 0.07261810508130548,
+      "rmse": 0.10173680795621644,
+      "r2": 0.3176768341180114
+    },
+    {
+      "horizon_min": 15,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "has_neighbours",
+      "n": 2099536,
+      "mae": 0.08181288304615515,
+      "rmse": 0.1160404750256081,
+      "r2": 0.8305974521606525
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "all",
+      "n": 2206813,
+      "mae": 0.10481295120608197,
+      "rmse": 0.15995997017881594,
+      "r2": 0.6762301378487178
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "post_neighbour_saturation",
+      "n": 249958,
+      "mae": 0.11238342476844387,
+      "rmse": 0.1672543564583938,
+      "r2": 0.5486788764845444
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "target_approaching_or_saturated",
+      "n": 604690,
+      "mae": 0.08869425163793497,
+      "rmse": 0.1472014816151247,
+      "r2": -0.07635436144670305
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "none",
+      "model": "persistence",
+      "subset": "has_neighbours",
+      "n": 2097998,
+      "mae": 0.10555438820804516,
+      "rmse": 0.16077254478754802,
+      "r2": 0.6729230038230793
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "all",
+      "n": 2206813,
+      "mae": 0.10913825908753444,
+      "rmse": 0.14797588472278833,
+      "r2": 0.7229260591181886
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "post_neighbour_saturation",
+      "n": 249958,
+      "mae": 0.11332435315548536,
+      "rmse": 0.1530826703618703,
+      "r2": 0.62192075049525
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "target_approaching_or_saturated",
+      "n": 604690,
+      "mae": 0.09336996451341828,
+      "rmse": 0.12891283914579377,
+      "r2": 0.17448825046316352
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "temporal",
+      "model": "ridge",
+      "subset": "has_neighbours",
+      "n": 2097998,
+      "mae": 0.10972107285615651,
+      "rmse": 0.14867241613692977,
+      "r2": 0.7203035029304568
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "all",
+      "n": 2206813,
+      "mae": 0.10277008511316213,
+      "rmse": 0.1406558494079954,
+      "r2": 0.7496604963379507
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "post_neighbour_saturation",
+      "n": 249958,
+      "mae": 0.10563270977117636,
+      "rmse": 0.14310328117464222,
+      "r2": 0.6696076623504085
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "target_approaching_or_saturated",
+      "n": 604690,
+      "mae": 0.08986235374245112,
+      "rmse": 0.12298850878587368,
+      "r2": 0.24861938929554028
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "temporal",
+      "model": "hgb",
+      "subset": "has_neighbours",
+      "n": 2097998,
+      "mae": 0.10340362253381119,
+      "rmse": 0.14128680834563406,
+      "r2": 0.747402261704665
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "all",
+      "n": 2206813,
+      "mae": 0.10834303268905361,
+      "rmse": 0.14703952702197678,
+      "r2": 0.7264214864859236
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "post_neighbour_saturation",
+      "n": 249958,
+      "mae": 0.11115452765404173,
+      "rmse": 0.15115204027612375,
+      "r2": 0.6313970464332349
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "target_approaching_or_saturated",
+      "n": 604690,
+      "mae": 0.09240632774791166,
+      "rmse": 0.12814104299437098,
+      "r2": 0.18434327450581067
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "spatial_temporal",
+      "model": "ridge",
+      "subset": "has_neighbours",
+      "n": 2097998,
+      "mae": 0.10878753187627616,
+      "rmse": 0.14764468249467705,
+      "r2": 0.7241570752549152
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "all",
+      "n": 2206813,
+      "mae": 0.10012701206285957,
+      "rmse": 0.1365331071806074,
+      "r2": 0.7641207495069902
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "post_neighbour_saturation",
+      "n": 249958,
+      "mae": 0.10261478965972845,
+      "rmse": 0.1384201472421319,
+      "r2": 0.6908783683270232
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "target_approaching_or_saturated",
+      "n": 604690,
+      "mae": 0.08814367933879866,
+      "rmse": 0.12032496859854866,
+      "r2": 0.2808120099271483
+    },
+    {
+      "horizon_min": 30,
+      "feature_set": "spatial_temporal",
+      "model": "hgb",
+      "subset": "has_neighbours",
+      "n": 2097998,
+      "mae": 0.10074485900676926,
+      "rmse": 0.1371512014230566,
+      "r2": 0.7619734175420847
+    }
+  ],
+  "comparisons": [
+    {
+      "horizon_min": 5,
+      "model": "ridge",
+      "subset": "all",
+      "n": 2209742,
+      "mae_temporal": 0.055466254137844624,
+      "mae_spatial_temporal": 0.0553913938812832,
+      "mae_reduction_pct": 0.13496540865258067,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 7.362347652322329e-05,
+        "ci95": [
+          1.516976531299522e-05,
+          0.00014817604145515853
+        ]
+      }
+    },
+    {
+      "horizon_min": 5,
+      "model": "hgb",
+      "subset": "all",
+      "n": 2209742,
+      "mae_temporal": 0.054794080975065385,
+      "mae_spatial_temporal": 0.05431149177973098,
+      "mae_reduction_pct": 0.8807323469007795,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.000482276379004379,
+        "ci95": [
+          0.00041865548287794,
+          0.0005414644570124864
+        ]
+      }
+    },
+    {
+      "horizon_min": 5,
+      "model": "ridge",
+      "subset": "post_neighbour_saturation",
+      "n": 250280,
+      "mae_temporal": 0.06155091170844483,
+      "mae_spatial_temporal": 0.061164196713540876,
+      "mae_reduction_pct": 0.6282847551239384,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0003872250238654149,
+        "ci95": [
+          0.0003072272258847498,
+          0.0004832386903724518
+        ]
+      }
+    },
+    {
+      "horizon_min": 5,
+      "model": "hgb",
+      "subset": "post_neighbour_saturation",
+      "n": 250280,
+      "mae_temporal": 0.06116181282533168,
+      "mae_spatial_temporal": 0.06100821299610039,
+      "mae_reduction_pct": 0.25113681582648395,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.00015303134687851344,
+        "ci95": [
+          8.555217439809767e-05,
+          0.0002193502927362178
+        ]
+      }
+    },
+    {
+      "horizon_min": 5,
+      "model": "ridge",
+      "subset": "target_approaching_or_saturated",
+      "n": 605393,
+      "mae_temporal": 0.048939149414141625,
+      "mae_spatial_temporal": 0.04880411452404959,
+      "mae_reduction_pct": 0.27592406428913907,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0001343709067425238,
+        "ci95": [
+          2.826477153752305e-05,
+          0.00026451298054936675
+        ]
+      }
+    },
+    {
+      "horizon_min": 5,
+      "model": "hgb",
+      "subset": "target_approaching_or_saturated",
+      "n": 605393,
+      "mae_temporal": 0.05051408695769146,
+      "mae_spatial_temporal": 0.05005564198293409,
+      "mae_reduction_pct": 0.9075586680233223,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0004596620160752512,
+        "ci95": [
+          0.0003848599001156787,
+          0.0005328540922482454
+        ]
+      }
+    },
+    {
+      "horizon_min": 5,
+      "model": "ridge",
+      "subset": "has_neighbours",
+      "n": 2100787,
+      "mae_temporal": 0.05575525164984414,
+      "mae_spatial_temporal": 0.055639884320257765,
+      "mae_reduction_pct": 0.206917422435667,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.00011392528722534361,
+        "ci95": [
+          4.822709201382152e-05,
+          0.00020046329827665276
+        ]
+      }
+    },
+    {
+      "horizon_min": 5,
+      "model": "hgb",
+      "subset": "has_neighbours",
+      "n": 2100787,
+      "mae_temporal": 0.05513212822726,
+      "mae_spatial_temporal": 0.05460864726745874,
+      "mae_reduction_pct": 0.9495025434959079,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0005230378343263384,
+        "ci95": [
+          0.00045662583804363037,
+          0.0005837005114414871
+        ]
+      }
+    },
+    {
+      "horizon_min": 10,
+      "model": "ridge",
+      "subset": "all",
+      "n": 2209033,
+      "mae_temporal": 0.0737785260381587,
+      "mae_spatial_temporal": 0.07353605193831922,
+      "mae_reduction_pct": 0.3286513201877568,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.00024034638274451287,
+        "ci95": [
+          0.00014704923413714875,
+          0.00035701464929141215
+        ]
+      }
+    },
+    {
+      "horizon_min": 10,
+      "model": "hgb",
+      "subset": "all",
+      "n": 2209033,
+      "mae_temporal": 0.07198288848844185,
+      "mae_spatial_temporal": 0.07111557666706575,
+      "mae_reduction_pct": 1.2048861050016966,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0008668065491205504,
+        "ci95": [
+          0.0007773263482388482,
+          0.0009511859066229037
+        ]
+      }
+    },
+    {
+      "horizon_min": 10,
+      "model": "ridge",
+      "subset": "post_neighbour_saturation",
+      "n": 250201,
+      "mae_temporal": 0.07974223810418488,
+      "mae_spatial_temporal": 0.07890650177715765,
+      "mae_reduction_pct": 1.0480472418335207,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0008367965754129363,
+        "ci95": [
+          0.0007016744256572802,
+          0.0010010088279281304
+        ]
+      }
+    },
+    {
+      "horizon_min": 10,
+      "model": "hgb",
+      "subset": "post_neighbour_saturation",
+      "n": 250201,
+      "mae_temporal": 0.07786062359437095,
+      "mae_spatial_temporal": 0.07701865203037529,
+      "mae_reduction_pct": 1.0813830215155433,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0008415738345109141,
+        "ci95": [
+          0.0007309050608930399,
+          0.000949957306012059
+        ]
+      }
+    },
+    {
+      "horizon_min": 10,
+      "model": "ridge",
+      "subset": "target_approaching_or_saturated",
+      "n": 605243,
+      "mae_temporal": 0.06441548302794847,
+      "mae_spatial_temporal": 0.06406429143840864,
+      "mae_reduction_pct": 0.5451974789779345,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0003504250658526396,
+        "ci95": [
+          0.00018972785398168587,
+          0.0005452620151581558
+        ]
+      }
+    },
+    {
+      "horizon_min": 10,
+      "model": "hgb",
+      "subset": "target_approaching_or_saturated",
+      "n": 605243,
+      "mae_temporal": 0.06494978840622156,
+      "mae_spatial_temporal": 0.06417261530239628,
+      "mae_reduction_pct": 1.196575266672989,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0007782380335670853,
+        "ci95": [
+          0.0006670910466088271,
+          0.0008940260646785666
+        ]
+      }
+    },
+    {
+      "horizon_min": 10,
+      "model": "ridge",
+      "subset": "has_neighbours",
+      "n": 2100121,
+      "mae_temporal": 0.07419787351952066,
+      "mae_spatial_temporal": 0.07388637826972498,
+      "mae_reduction_pct": 0.4198169502980811,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0003090123906235972,
+        "ci95": [
+          0.0002041346429137185,
+          0.00044516432313930043
+        ]
+      }
+    },
+    {
+      "horizon_min": 10,
+      "model": "hgb",
+      "subset": "has_neighbours",
+      "n": 2100121,
+      "mae_temporal": 0.07246335684261322,
+      "mae_spatial_temporal": 0.07157368191572833,
+      "mae_reduction_pct": 1.227758367332091,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0008890016012342177,
+        "ci95": [
+          0.0007935706512152824,
+          0.000977043634022111
+        ]
+      }
+    },
+    {
+      "horizon_min": 15,
+      "model": "ridge",
+      "subset": "all",
+      "n": 2208421,
+      "mae_temporal": 0.08562736703927509,
+      "mae_spatial_temporal": 0.08522487071164013,
+      "mae_reduction_pct": 0.47005570946768477,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.00039977312270515953,
+        "ci95": [
+          0.0002781377931776913,
+          0.0005496336453605546
+        ]
+      }
+    },
+    {
+      "horizon_min": 15,
+      "model": "hgb",
+      "subset": "all",
+      "n": 2208421,
+      "mae_temporal": 0.08259497488908484,
+      "mae_spatial_temporal": 0.08128314539835127,
+      "mae_reduction_pct": 1.5882679212569473,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0013115214838054585,
+        "ci95": [
+          0.0011851701963453878,
+          0.0014287591151695678
+        ]
+      }
+    },
+    {
+      "horizon_min": 15,
+      "model": "ridge",
+      "subset": "post_neighbour_saturation",
+      "n": 250132,
+      "mae_temporal": 0.09101704942202822,
+      "mae_spatial_temporal": 0.08980713335003468,
+      "mae_reduction_pct": 1.3293290429394142,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0012109365347413791,
+        "ci95": [
+          0.0010124868714598753,
+          0.001439879804851569
+        ]
+      }
+    },
+    {
+      "horizon_min": 15,
+      "model": "hgb",
+      "subset": "post_neighbour_saturation",
+      "n": 250132,
+      "mae_temporal": 0.08758664822302835,
+      "mae_spatial_temporal": 0.0861529559990619,
+      "mae_reduction_pct": 1.6368844487754874,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.001433431455432337,
+        "ci95": [
+          0.0012652147957417233,
+          0.0015813177813180247
+        ]
+      }
+    },
+    {
+      "horizon_min": 15,
+      "model": "ridge",
+      "subset": "target_approaching_or_saturated",
+      "n": 605093,
+      "mae_temporal": 0.07422951529080171,
+      "mae_spatial_temporal": 0.07369700308518162,
+      "mae_reduction_pct": 0.7173860741699825,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0005319465867495383,
+        "ci95": [
+          0.0003325300547172347,
+          0.0007764656185236904
+        ]
+      }
+    },
+    {
+      "horizon_min": 15,
+      "model": "hgb",
+      "subset": "target_approaching_or_saturated",
+      "n": 605093,
+      "mae_temporal": 0.07360349732416283,
+      "mae_spatial_temporal": 0.07261810508130548,
+      "mae_reduction_pct": 1.3387845397040106,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0009872233887988796,
+        "ci95": [
+          0.0008165267002027938,
+          0.0011476005808093717
+        ]
+      }
+    },
+    {
+      "horizon_min": 15,
+      "model": "ridge",
+      "subset": "has_neighbours",
+      "n": 2099536,
+      "mae_temporal": 0.08612192281667413,
+      "mae_spatial_temporal": 0.08562633490692725,
+      "mae_reduction_pct": 0.5754491928864941,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.000492373496725006,
+        "ci95": [
+          0.00035342619455410286,
+          0.0006605256279894256
+        ]
+      }
+    },
+    {
+      "horizon_min": 15,
+      "model": "hgb",
+      "subset": "has_neighbours",
+      "n": 2099536,
+      "mae_temporal": 0.08314882335633678,
+      "mae_spatial_temporal": 0.08181288304615515,
+      "mae_reduction_pct": 1.6066857668645675,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0013354452630341721,
+        "ci95": [
+          0.0012028915010784968,
+          0.0014568464463078454
+        ]
+      }
+    },
+    {
+      "horizon_min": 30,
+      "model": "ridge",
+      "subset": "all",
+      "n": 2206813,
+      "mae_temporal": 0.10913825908753444,
+      "mae_spatial_temporal": 0.10834303268905361,
+      "mae_reduction_pct": 0.7286412712915054,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0007909706011404904,
+        "ci95": [
+          0.0006025418633645504,
+          0.00101627848184029
+        ]
+      }
+    },
+    {
+      "horizon_min": 30,
+      "model": "hgb",
+      "subset": "all",
+      "n": 2206813,
+      "mae_temporal": 0.10277008511316213,
+      "mae_spatial_temporal": 0.10012701206285957,
+      "mae_reduction_pct": 2.5718311387912394,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.00264339444723011,
+        "ci95": [
+          0.0023918958600436355,
+          0.0028737185424384812
+        ]
+      }
+    },
+    {
+      "horizon_min": 30,
+      "model": "ridge",
+      "subset": "post_neighbour_saturation",
+      "n": 249958,
+      "mae_temporal": 0.11332435315548536,
+      "mae_spatial_temporal": 0.11115452765404173,
+      "mae_reduction_pct": 1.91470362814827,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.002169315268771565,
+        "ci95": [
+          0.0018482397535562758,
+          0.002550389756640983
+        ]
+      }
+    },
+    {
+      "horizon_min": 30,
+      "model": "hgb",
+      "subset": "post_neighbour_saturation",
+      "n": 249958,
+      "mae_temporal": 0.10563270977117636,
+      "mae_spatial_temporal": 0.10261478965972845,
+      "mae_reduction_pct": 2.8569939349140916,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.003019923559977773,
+        "ci95": [
+          0.002713464850010274,
+          0.0033047714882905948
+        ]
+      }
+    },
+    {
+      "horizon_min": 30,
+      "model": "ridge",
+      "subset": "target_approaching_or_saturated",
+      "n": 604690,
+      "mae_temporal": 0.09336996451341828,
+      "mae_spatial_temporal": 0.09240632774791166,
+      "mae_reduction_pct": 1.0320629021639343,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0009629569359358896,
+        "ci95": [
+          0.0006687741810216882,
+          0.0013228608758036403
+        ]
+      }
+    },
+    {
+      "horizon_min": 30,
+      "model": "hgb",
+      "subset": "target_approaching_or_saturated",
+      "n": 604690,
+      "mae_temporal": 0.08986235374245112,
+      "mae_spatial_temporal": 0.08814367933879866,
+      "mae_reduction_pct": 1.9125633060739178,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0017216082381264824,
+        "ci95": [
+          0.0014736279732550399,
+          0.0019619111185101208
+        ]
+      }
+    },
+    {
+      "horizon_min": 30,
+      "model": "ridge",
+      "subset": "has_neighbours",
+      "n": 2097998,
+      "mae_temporal": 0.10972107285615651,
+      "mae_spatial_temporal": 0.10878753187627616,
+      "mae_reduction_pct": 0.8508310715337418,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.0009285765124407888,
+        "ci95": [
+          0.0007181280042974932,
+          0.0011963869521311183
+        ]
+      }
+    },
+    {
+      "horizon_min": 30,
+      "model": "hgb",
+      "subset": "has_neighbours",
+      "n": 2097998,
+      "mae_temporal": 0.10340362253381119,
+      "mae_spatial_temporal": 0.10074485900676926,
+      "mae_reduction_pct": 2.5712479523360634,
+      "bootstrap": {
+        "days": 61,
+        "mae_diff_mean": 0.002658706630073899,
+        "ci95": [
+          0.0023944790127375733,
+          0.002897073799580026
+        ]
+      }
+    }
+  ],
+  "runtime_s": 1197
+}
