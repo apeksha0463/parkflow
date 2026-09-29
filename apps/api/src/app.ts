@@ -11,6 +11,8 @@ import { authenticate, requireCsrfHeader } from './middleware/auth.js';
 import { authRouter } from './routes/auth.js';
 import { adminRouter } from './routes/admin.js';
 import { getSettings } from './services/settings.js';
+import { areasRouter, parkingRouter } from './routes/parking.js';
+import { searchRouter } from './routes/search.js';
 
 export function createApp() {
   const app = express();
@@ -48,6 +50,9 @@ export function createApp() {
     res.json({ saturationThreshold: s.saturationThreshold, approachingThreshold: s.approachingThreshold, staleAfterMinutes: s.staleAfterMinutes });
   });
   api.use('/auth', authRouter);
+  api.use('/parking', parkingRouter);
+  api.use('/areas', areasRouter);
+  api.use('/search', searchRouter);
   api.use('/admin', adminRouter);
 
   app.use('/api', api);

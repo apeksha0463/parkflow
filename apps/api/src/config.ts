@@ -3,6 +3,9 @@ import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
 import { z } from 'zod';
 
+// All user-facing times (opening hours, 'open now') are Bengaluru local time.
+process.env.TZ ??= 'Asia/Kolkata';
+
 // Local development shares the workspace-root .env. In production, variables come from the host.
 loadEnv({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../.env'), quiet: true });
 

@@ -122,10 +122,13 @@ model ParkingFacility {
   id               String                                 @id @default(cuid())
   /// Stable id from the upstream source, e.g. "osm:way/123456".
   externalId       String?                                @unique
-  name             String
+  /// Name as given by the source; null when the source has none (UI shows a derived label).
+  name             String?
   type             ParkingType                            @default(UNKNOWN)
   address          String?
   area             String?
+  localityId       String?
+  locality         Locality?                              @relation(fields: [localityId], references: [id], onDelete: SetNull)
   latitude         Float
   longitude        Float
   location         Unsupported("geography(Point, 4326)")?
@@ -152,6 +155,7 @@ model ParkingFacility {
   savedBy          SavedParking[]
 
   @@index([area])
+  @@index([localityId])
   @@index([type])
   @@index([location], type: Gist)
 }
@@ -321,4 +325,22 @@ model SystemConfig {
   value       Json
   updatedById String?
   updatedAt   DateTime @updatedAt
+}
+
+/// Named Bengaluru place (suburb / neighbourhood / quarter) from OpenStreetMap.
+/// Used for offline area search and for labelling facilities with their nearest locality.
+model Locality {
+  id         String                                 @id @default(cuid())
+  externalId String                                 @unique
+  name       String
+  placeType  String
+  latitude   Float
+  longitude  Float
+  location   Unsupported("geography(Point, 4326)")?
+  createdAt  DateTime                               @default(now())
+  updatedAt  DateTime                               @updatedAt
+  facilities ParkingFacility[]
+
+  @@index([name])
+  @@index([location], type: Gist)
 }

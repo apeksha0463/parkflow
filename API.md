@@ -32,4 +32,44 @@ Base URL: `${VITE_API_URL}` (e.g. `https://api.example.com`). All JSON.
 | PATCH | `/api/admin/settings` | Partial update; validated (`approaching < saturation`), audited |
 | GET | `/api/admin/audit-logs` | `?page&pageSize&entityType&action` (action is a prefix match) |
 
-Parking, spillover, analytics, bookings and simulation endpoints are documented as they land.
+## Search
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/search/geocode?q=&mode=suggest` | – | Type-ahead from ParkFlow's locality index (OSM place names). Never calls external services. |
+| GET | `/api/search/geocode?q=&mode=full` | – | Localities + Nominatim geocoding bounded to Bengaluru. Call on explicit submit only (Nominatim forbids autocomplete). `geocoder`: `ok` / `unavailable` (falls back to localities). 20/min per IP. |
+| POST | `/api/search/recent` | user | `{query, latitude, longitude}`; keeps the last 20 |
+| GET | `/api/search/recent` | user | Last 10 searches |
+
+Result item: `{ id, label, sublabel, latitude, longitude, kind: 'locality' | 'place', source }`.
+
+## Parking directory
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/parking` | List/search. Location: `lat&lng&radius` (100–10000 m, default 2000), `bbox=w,s,e,n`, or `areaId`. Filters: `q`, `types=A,B`, `vehicleType`, `ev`, `free`, `openNow`, `hasAvailability`. `sort=distance\|name\|capacity\|availability`. Paginated. |
+| GET | `/api/parking/map?bbox=w,s,e,n&types=` | Compact markers `{id, latitude, longitude, type, isDemo, availabilityState, occupancy}` for client-side clustering |
+| GET | `/api/parking/:id` | Facility detail including zones |
+| GET | `/api/parking/:id/neighbours?radius=&limit=` | Facilities within `radius` metres (default: admin `neighbourRadiusMeters`), nearest first |
+| GET | `/api/areas/:id` | Locality |
+| GET | `/api/areas/:id/parking` | Same as `/api/parking`, centred on the locality (default radius 1500 m) |
+
+### Facility object (abridged)
+```jsonc
+{
+  "id": "…", "name": null, "displayName": "Multi-level parking near Koramangala 6th Block", "nameIsDerived": true,
+  "type": "MULTI_LEVEL", "typeLabel": "Multi-level", "distanceMeters": 502,
+  "capacity": null, "pricingText": null, "isFree": null, "operatingHours": null, "openNow": null, // null = unknown
+  "availabilityMode": "NONE", "isDemo": false,
+  "availability": { "state": "UNAVAILABLE", "message": "Availability currently unavailable.", "available": null, "occupancy": null, "observedAt": null, "ageMinutes": null },
+  "source": { "name": "OpenStreetMap", "sourceType": "VERIFIED_DIRECTORY", "license": "ODbL 1.0 …", "recordUrl": "https://www.openstreetmap.org/way/…", "lastVerifiedAt": "2026-06-01T08:52:28Z" }
+}
+```
+
+`availability.state`:
+- `LIVE`: real provider feed, fresh.
+- `SIMULATED`: historical replay, fresh.
+- `STALE`: older than `staleAfterMinutes`.
+- `HISTORICAL_ONLY`: no current source; the numbers are historical.
+- `UNAVAILABLE`: no data.
+
+Spillover, prediction, analytics, booking and simulation endpoints are documented as they land.
+
