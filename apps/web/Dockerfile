@@ -28,5 +28,4 @@ COPY apps/web/nginx.conf /etc/nginx/templates/default.conf.template
 
 EXPOSE 80
 
-# envsubst substitutes $API_UPSTREAM from the environment, then starts nginx
-CMD ["/bin/sh", "-c", "envsubst '${API_UPSTREAM}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+CMD ["/bin/sh", "-c", "export PORT=${PORT:-80}; envsubst '${API_UPSTREAM} ${PORT}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
