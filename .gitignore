@@ -18,7 +18,8 @@ data/processed/*.parquet
 data/processed/*.csv
 data/processed/*.npz
 data/processed/*.txt
-data/processed/replay_melbourne.json
+# replay_melbourne.json is committed for Railway deployment builds (38 MB)
+# data/processed/replay_melbourne.json
 ml/evaluation/saturation_events.csv
 !data/processed/.gitkeep
 # Trained models (~1 MB each) are committed so the ML service deploys with them; see ML_PIPELINE.md
