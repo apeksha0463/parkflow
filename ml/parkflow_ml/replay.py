@@ -10,10 +10,13 @@ product's event list is exactly the research event definition applied to the tes
 
 Nothing here changes the research pipeline; it only re-exports its processed outputs.
 
-Usage: python -m parkflow_ml.replay
+Usage: python -m parkflow_ml.replay [--weeks N]
+  --weeks N  export only the first N weeks of the test split (smaller database, e.g. for a free hosted tier);
+             default: the whole test split.
 """
 from __future__ import annotations
 
+import argparse
 import json
 
 import numpy as np
@@ -43,12 +46,14 @@ def to_utc(local: pd.Timestamp) -> str:
     return local.tz_localize(SOURCE_TZ).tz_convert("UTC").isoformat().replace("+00:00", "Z")
 
 
-def main() -> dict:
+def main(weeks: int | None = None) -> dict:
     occ, observed, zone_ids, zones, neighbours = load_grid()
     steps_per_day = 24 * 60 // BUCKET_MINUTES
     replay_col = (pd.Timestamp(SPLITS["test"][0]) - EPOCH).days * steps_per_day
     start_col = replay_col - HISTORY_DAYS * steps_per_day
     stop_col = min(occ.shape[1], ((pd.Timestamp(SPLITS["test"][1]) - EPOCH).days + 1) * steps_per_day)
+    if weeks is not None:
+        stop_col = min(stop_col, replay_col + weeks * 7 * steps_per_day)
     history_start = EPOCH + pd.Timedelta(minutes=start_col * BUCKET_MINUTES)
     replay_start = EPOCH + pd.Timedelta(minutes=replay_col * BUCKET_MINUTES)
     replay_end = EPOCH + pd.Timedelta(minutes=(stop_col - 1) * BUCKET_MINUTES)
@@ -114,4 +119,6 @@ def main() -> dict:
 
 
 if __name__ == "__main__":
-    main()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--weeks", type=int, default=None, help="export only the first N weeks of the test split")
+    main(ap.parse_args().weeks)

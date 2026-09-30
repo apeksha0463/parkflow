@@ -1,0 +1,38 @@
+# Render Blueprint: the API and the ML service. The database is Neon PostGIS; the frontend is on Vercel.
+# Secrets are entered in the Render dashboard (sync: false) and never committed. See DEPLOYMENT.md.
+services:
+  - type: web
+    name: parkflow-ml
+    runtime: python
+    plan: free
+    rootDir: ml
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn service.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.7
+
+  - type: web
+    name: parkflow-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build -w apps/api
+    # Migrations are idempotent; running them at start keeps the schema in step with the deployed code.
+    startCommand: npm run db:migrate -w apps/api && node apps/api/dist/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.11.0
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false # Neon connection string (sslmode=require)
+      - key: ML_SERVICE_URL
+        sync: false # https://<parkflow-ml>.onrender.com
+      - key: CORS_ORIGINS
+        sync: false # https://<your-project>.vercel.app
+      - key: GEOCODER_USER_AGENT
+        value: ParkFlow/0.1 (https://github.com/apeksha0463/parflow)

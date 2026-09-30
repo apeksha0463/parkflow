@@ -75,4 +75,4 @@ npm run build && npm run lint
 cd ml && .venv/Scripts/python -m pytest -q
 ```
 
-See ARCHITECTURE.md, API.md, DATASET.md, ML_PIPELINE.md, RESEARCH.md and TESTING.md.
+See ARCHITECTURE.md, API.md, DATASET.md, ML_PIPELINE.md, RESEARCH.md, TESTING.md and DEPLOYMENT.md.
