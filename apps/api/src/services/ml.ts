@@ -91,6 +91,11 @@ export async function getEvaluation(): Promise<unknown> {
   return call('/evaluation');
 }
 
+/** Processing reports of the research dataset (ingest / occupancy grid / geo), as written by the pipeline. */
+export async function getDataset(): Promise<unknown> {
+  return call('/dataset');
+}
+
 export async function predict(body: PredictRequest): Promise<MlPrediction> {
   return call<MlPrediction>('/predict', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 }

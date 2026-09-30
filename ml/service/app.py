@@ -7,6 +7,8 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from parkflow_ml.config import DATASET_ID, PROCESSED_DIR
+
 from .predictor import PredictionUnavailable, predict
 from .registry import load_registry, registry_path
 
@@ -40,6 +42,18 @@ def evaluation() -> dict:
     if not path.exists():
         raise HTTPException(503, {"code": "NO_EVALUATION", "message": "No evaluation results are available"})
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+@app.get("/dataset")
+def dataset() -> dict:
+    """Dataset processing reports written by the pipeline (ingest, occupancy grid, geo), unmodified."""
+    out = {}
+    for name in ("ingest", "occupancy", "geo"):
+        path = PROCESSED_DIR / f"{name}_report.json"
+        out[name] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    if not any(out.values()):
+        raise HTTPException(503, {"code": "NO_DATASET_REPORT", "message": "No dataset reports are available"})
+    return {"dataset": DATASET_ID, **out}
 
 
 class NeighbourIn(BaseModel):

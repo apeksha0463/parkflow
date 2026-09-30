@@ -1,104 +1,149 @@
 /**
- * SIMULATION MODE — historical parking data replay.
+ * HISTORICAL REPLAY — City of Melbourne on-street parking sensors, 2019 (test split).
  *
- * Demo zones (facility.isDemo, availabilityMode SIMULATION, zone.replaySourceZone set) receive occupancy
- * snapshots replayed from the research dataset's test period (see ml/parkflow_ml/replay.py). The replayed
- * value for a wall-clock instant is the recorded value at the same weekday and time of day, cycling through
- * the exported weeks. Every snapshot is written with sourceType SIMULATION; nothing here is live data.
+ * The recorded history is loaded into the database once (scripts/seed-melbourne.ts) with its real 2019
+ * timestamps. A single server-side replay clock maps wall-clock time to a 2019 instant; every "current"
+ * value in the API is the recorded value at the replay clock. Nothing here is live data, and the UI always
+ * labels it "Historical replay".
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prisma } from '../lib/db.js';
-import { syncSaturation } from './spillover.js';
+
+export const SOURCE_NAME = 'City of Melbourne on-street parking sensors (2019)';
 
 export interface ReplayZone {
-  sourceZone: string;
+  key: string;
   label: string;
+  street: string | null;
+  area: string | null;
   sensorCount: number;
-  eastM: number;
-  northM: number;
+  latitude: number;
+  longitude: number;
+  neighbours: { key: string; distanceM: number }[];
   occupancy: (number | null)[];
-  observedBays: number[];
+  bays: number[];
+  events: { onset: number; end: number | null; peak: number }[];
 }
 
 export interface ReplayPayload {
   dataset: string;
   licence: string;
+  sourceUrl: string;
   note: string;
+  timezone: string;
   stepMinutes: number;
+  seriesStart: string;
   replayStart: string;
-  weeks: number;
+  replayEnd: string;
+  steps: number;
+  saturationThreshold: number;
+  neighbourRadiusM: number;
+  zonesWithoutReplayData: number;
   zones: ReplayZone[];
 }
 
-const STEP_MS = 5 * 60_000;
-const WEEK_STEPS = 7 * 288;
-const BACKFILL_MS = 7 * 24 * 3_600_000 + STEP_MS;
-
-export const DEFAULT_REPLAY_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../data/processed/replay_cluster.json');
+export const DEFAULT_REPLAY_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../data/processed/replay_melbourne.json');
 
 export function loadReplay(file = process.env.REPLAY_DATA_PATH || DEFAULT_REPLAY_PATH): ReplayPayload | null {
   if (!fs.existsSync(file)) return null;
   return JSON.parse(fs.readFileSync(file, 'utf8')) as ReplayPayload;
 }
 
-/** Index into the replay series for a grid instant: same weekday + time of day (local wall clock), cycling weeks. */
-export function replayIndex(t: Date, weeks: number): number {
-  const weekday = (t.getDay() + 6) % 7; // Monday = 0
-  const slot = weekday * 288 + Math.floor((t.getHours() * 60 + t.getMinutes()) / 5);
-  const localDay = Math.floor((t.getTime() - t.getTimezoneOffset() * 60_000) / 86_400_000);
-  const week = Math.floor((localDay - 4) / 7); // 1970-01-05 was a Monday
-  return (((week % weeks) + weeks) % weeks) * WEEK_STEPS + slot;
+// ---------------------------------------------------------------------------
+// Replay clock
+// ---------------------------------------------------------------------------
+export const STEP_MS = 5 * 60_000;
+const RANGE_KEY = 'replayRange';
+const CLOCK_KEY = 'replayClock';
+
+export interface ReplayRange {
+  start: string;
+  end: string;
+  timezone: string;
+  dataset: string;
 }
 
-/** Writes replay snapshots for every grid instant in (from, to]. Idempotent. Returns rows written. */
-export async function writeReplaySnapshots(payload: ReplayPayload, from: Date, to: Date): Promise<number> {
-  const zones = await prisma.parkingZone.findMany({
-    where: { replaySourceZone: { not: null }, facility: { isDemo: true, availabilityMode: 'SIMULATION' } },
-    select: { id: true, replaySourceZone: true },
-  });
-  const bySource = new Map(payload.zones.map((z) => [z.sourceZone, z]));
-  const rows = [];
-  for (let t = Math.floor(from.getTime() / STEP_MS) * STEP_MS + STEP_MS; t <= to.getTime(); t += STEP_MS) {
-    const at = new Date(t);
-    const idx = replayIndex(at, payload.weeks);
-    for (const z of zones) {
-      const src = bySource.get(z.replaySourceZone!);
-      const occ = src?.occupancy[idx];
-      const cap = src?.observedBays[idx];
-      if (occ == null || !cap) continue; // unknown in the source stays unknown
-      const occupied = Math.round(occ * cap);
-      rows.push({ zoneId: z.id, observedAt: at, occupied, capacity: cap, available: cap - occupied, occupancy: occ, sourceType: 'SIMULATION' as const });
-    }
-  }
-  let written = 0;
-  for (let i = 0; i < rows.length; i += 5000) {
-    written += (await prisma.occupancySnapshot.createMany({ data: rows.slice(i, i + 5000), skipDuplicates: true })).count;
-  }
-  return written;
+interface ClockState {
+  /** Replay instant at `anchor`. */
+  replayAt: string;
+  /** Wall-clock instant the state was set. */
+  anchor: string;
+  playing: boolean;
+  speed: number;
 }
 
-/** Backfills one week and then keeps replay snapshots current. No-op without demo zones or replay data. */
-export async function startReplay(log: (msg: string) => void = console.log): Promise<NodeJS.Timeout | null> {
-  const payload = loadReplay();
-  if (!payload) {
-    log('Simulation replay: no replay data file; simulation mode inactive');
-    return null;
+export interface ReplayClock {
+  configured: boolean;
+  /** Current replay instant, floored to the 5-minute grid. */
+  now: Date;
+  playing: boolean;
+  speed: number;
+  range: ReplayRange | null;
+}
+
+export async function setReplayRange(range: ReplayRange) {
+  await prisma.systemConfig.upsert({ where: { key: RANGE_KEY }, create: { key: RANGE_KEY, value: { ...range } }, update: { value: { ...range } } });
+}
+
+let cached: { at: number; clock: ReplayClock } | null = null;
+const CACHE_MS = 2000;
+
+export function clearReplayCache() {
+  cached = null;
+}
+
+const floor = (ms: number) => Math.floor(ms / STEP_MS) * STEP_MS;
+
+/** Pure: the replay instant for a clock state at wall time `wall`, wrapping around the replay range. */
+export function replayInstant(state: ClockState, range: ReplayRange, wall: number): number {
+  const start = new Date(range.start).getTime();
+  const end = new Date(range.end).getTime();
+  let t = new Date(state.replayAt).getTime() + (state.playing ? (wall - new Date(state.anchor).getTime()) * state.speed : 0);
+  const span = end - start + STEP_MS;
+  if (t < start || t > end) t = start + ((((t - start) % span) + span) % span);
+  return floor(t);
+}
+
+/** The server replay clock. When no replay is seeded, falls back to wall-clock time (configured: false). */
+export async function getReplayClock(wall: number = Date.now()): Promise<ReplayClock> {
+  if (cached && wall - cached.at < CACHE_MS) return cached.clock;
+  const rows = await prisma.systemConfig.findMany({ where: { key: { in: [RANGE_KEY, CLOCK_KEY] } } });
+  const range = rows.find((r) => r.key === RANGE_KEY)?.value as ReplayRange | undefined;
+  let clock: ReplayClock;
+  if (!range) {
+    clock = { configured: false, now: new Date(wall), playing: true, speed: 1, range: null };
+  } else {
+    const state = (rows.find((r) => r.key === CLOCK_KEY)?.value as ClockState | undefined) ?? {
+      replayAt: range.start,
+      anchor: new Date(wall).toISOString(),
+      playing: true,
+      speed: 1,
+    };
+    clock = { configured: true, now: new Date(replayInstant(state, range, wall)), playing: state.playing, speed: state.speed, range };
   }
-  const count = await prisma.parkingZone.count({ where: { replaySourceZone: { not: null }, facility: { isDemo: true } } });
-  if (!count) {
-    log('Simulation replay: no demo zones seeded (npm run db:seed:simulation -w apps/api)');
-    return null;
-  }
-  const tick = async () => {
-    const now = new Date();
-    await writeReplaySnapshots(payload, new Date(now.getTime() - BACKFILL_MS), now);
-    await syncSaturation(now);
+  cached = { at: wall, clock };
+  return clock;
+}
+
+/** The instant every "current" value refers to. */
+export async function replayNow(): Promise<Date> {
+  return (await getReplayClock()).now;
+}
+
+/** Seek and/or play/pause the replay clock. `at` must lie within the replay range. */
+export async function setReplayClock(patch: { at?: Date; playing?: boolean; speed?: number }, wall: number = Date.now()): Promise<ReplayClock> {
+  clearReplayCache();
+  const current = await getReplayClock(wall);
+  if (!current.range) throw new Error('Replay is not configured');
+  const state: ClockState = {
+    replayAt: new Date(floor((patch.at ?? current.now).getTime())).toISOString(),
+    anchor: new Date(wall).toISOString(),
+    playing: patch.playing ?? current.playing,
+    speed: patch.speed ?? current.speed,
   };
-  await tick();
-  log(`Simulation replay active for ${count} demo zones (${payload.dataset}, ${payload.weeks} weeks)`);
-  const timer = setInterval(() => tick().catch((err) => log(`Simulation replay tick failed: ${err instanceof Error ? err.message : err}`)), 60_000);
-  timer.unref();
-  return timer;
+  await prisma.systemConfig.upsert({ where: { key: CLOCK_KEY }, create: { key: CLOCK_KEY, value: { ...state } }, update: { value: { ...state } } });
+  clearReplayCache();
+  return getReplayClock(wall);
 }

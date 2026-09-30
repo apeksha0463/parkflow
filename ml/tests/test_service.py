@@ -89,3 +89,25 @@ def test_short_or_missing_history_is_refused_not_guessed(tiny_registry):
 def test_out_of_range_occupancy_is_rejected(tiny_registry):
     res = TestClient(app).post("/predict", json=_body(history=[1.4] * 24))
     assert res.status_code == 422
+
+
+def test_dataset_returns_pipeline_reports_unmodified(tmp_path, monkeypatch):
+    from service import app as app_module
+    (tmp_path / "ingest_report.json").write_text(json.dumps({"final_rows": 123}))
+    monkeypatch.setattr(app_module, "PROCESSED_DIR", tmp_path)
+    body = TestClient(app).get("/dataset").json()
+    assert body["ingest"] == {"final_rows": 123}
+    assert body["geo"] is None
+
+
+def test_dataset_is_503_without_reports(tmp_path, monkeypatch):
+    from service import app as app_module
+    monkeypatch.setattr(app_module, "PROCESSED_DIR", tmp_path)
+    assert TestClient(app).get("/dataset").status_code == 503
+
+
+def test_replay_zone_label_uses_source_text_or_block_key():
+    from parkflow_ml.replay import zone_label
+    assert zone_label(pd.Series({"key": "1:2-3", "street": "BOURKE STREET", "between1": "A STREET", "between2": "B STREET"})) == "Bourke Street between A Street and B Street"
+    assert zone_label(pd.Series({"key": "1:2-3", "street": "BOURKE STREET", "between1": None, "between2": None})) == "Bourke Street"
+    assert zone_label(pd.Series({"key": "1:2-3", "street": None, "between1": None, "between2": None})) == "Block 1:2-3"

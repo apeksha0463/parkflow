@@ -6,13 +6,14 @@ import { createApp } from '../app.js';
 import { config } from '../config.js';
 import { prisma } from '../lib/db.js';
 import { clearRegistryCache } from '../services/ml.js';
+import { clearReplayCache, setReplayRange } from '../services/replay.js';
 import { evaluateDuePredictions, floorToStep, gridHistories, HISTORY_STEPS } from '../services/predictions.js';
 import { rankAlternatives } from '../services/spillover.js';
 import { DEFAULT_SETTINGS } from '../services/settings.js';
-import { createUser, loginAs, resetDb } from '../test/helpers.js';
+import { createUser, CSRF, loginAs, resetDb } from '../test/helpers.js';
 
 const app = createApp();
-const ORIGIN = { lat: 12.9716, lng: 77.5946 };
+const ORIGIN = { lat: -37.8136, lng: 144.9631 }; // test fixture coordinates
 
 /**
  * Stand-in for the Python ML service. It checks request plumbing only: the "prediction" is a fixed rule
@@ -29,6 +30,10 @@ const REGISTRY = {
       id: 'spatial_temporal-hgb-v1', feature_set: 'spatial_temporal', algorithm: 'HGB', training_dataset: 'test', trained_at: '2026-01-01T00:00:00Z',
       feature_version: 'v1', features: [], horizons_minutes: [5, 15], test_metrics: [], config: { neighbour_radius_m: 400, bucket_minutes: 5, saturation_threshold: 0.9 },
     },
+    {
+      id: 'temporal-hgb-v1', feature_set: 'temporal', algorithm: 'HGB', training_dataset: 'test', trained_at: '2026-01-01T00:00:00Z',
+      feature_version: 'v1', features: [], horizons_minutes: [5, 15], test_metrics: [], config: { neighbour_radius_m: 400, bucket_minutes: 5, saturation_threshold: 0.9 },
+    },
   ],
 };
 
@@ -42,6 +47,7 @@ beforeAll(async () => {
       res.setHeader('content-type', 'application/json');
       if (req.url === '/models') return res.end(JSON.stringify(REGISTRY));
       if (req.url === '/evaluation') return res.end(JSON.stringify({ metrics: [] }));
+      if (req.url === '/dataset') return res.end(JSON.stringify({ dataset: 'test', ingest: { final_rows: 10 } }));
       if (req.url === '/predict') {
         const last = body.history[body.history.length - 1];
         return res.end(JSON.stringify({
@@ -64,25 +70,34 @@ beforeEach(async () => {
   await resetDb();
   requests = [];
   clearRegistryCache();
+  clearReplayCache();
   config.ML_SERVICE_URL = stubUrl;
 });
 
 async function fixtures() {
-  const osm = await prisma.dataSource.create({ data: { name: 'OpenStreetMap', sourceType: 'VERIFIED_DIRECTORY' } });
-  const sim = await prisma.dataSource.create({ data: { name: 'ParkFlow Simulation', sourceType: 'SIMULATION' } });
-  const mk = (id: string, dLat: number, simulated: boolean, extra: Record<string, unknown> = {}) =>
+  const other = await prisma.dataSource.create({ data: { name: 'Test directory', sourceType: 'VERIFIED_DIRECTORY' } });
+  const sensors = await prisma.dataSource.create({ data: { name: 'Test sensors', sourceType: 'HISTORICAL_DATA' } });
+  const mk = (id: string, dLat: number, replay: boolean, extra: Record<string, unknown> = {}) =>
     prisma.parkingFacility.create({
       data: {
         id, externalId: `test:${id}`, name: id, latitude: ORIGIN.lat + dLat, longitude: ORIGIN.lng,
-        dataSourceId: simulated ? sim.id : osm.id, availabilityMode: simulated ? 'SIMULATION' : 'NONE', isDemo: simulated,
+        dataSourceId: replay ? sensors.id : other.id, availabilityMode: replay ? 'REPLAY' : 'NONE',
         zones: { create: { id: `z_${id}`, name: 'Main', latitude: ORIGIN.lat + dLat, longitude: ORIGIN.lng } },
         ...extra,
       },
     });
   await mk('a', 0, true);
-  await mk('b', 0.002, true); // ~220 m: within the model radius (400 m)
-  await mk('c', 0.006, true); // ~670 m: outside the model radius, inside the app radius (800 m)
+  await mk('b', 0.002, true);
+  await mk('c', 0.006, true);
   await mk('osm', 0.001, false);
+  // Research neighbour pairs. c is listed beyond the model radius (400 m) to prove the radius is applied.
+  await prisma.zoneNeighbour.createMany({
+    data: [
+      { zoneId: 'z_a', neighbourId: 'z_b', distanceM: 222 },
+      { zoneId: 'z_a', neighbourId: 'z_c', distanceM: 667 },
+      { zoneId: 'z_a', neighbourId: 'z_osm', distanceM: 111 },
+    ],
+  });
 }
 
 /** Snapshots every 5 minutes for the last `count` steps ending at the current grid instant. */
@@ -92,7 +107,7 @@ async function series(zoneId: string, values: number[], capacity = 20) {
     data: values.map((v, i) => ({
       zoneId,
       observedAt: new Date(end.getTime() - (values.length - 1 - i) * 300_000),
-      occupied: Math.round(v * capacity), capacity, available: capacity - Math.round(v * capacity), occupancy: v, sourceType: 'SIMULATION' as const,
+      occupied: Math.round(v * capacity), capacity, available: capacity - Math.round(v * capacity), occupancy: v, sourceType: 'HISTORICAL_DATA' as const,
     })),
   });
 }
@@ -106,7 +121,7 @@ describe('GET /api/parking/:id/predictions', () => {
     expect(requests).toHaveLength(0);
   });
 
-  it('never applies the research (Melbourne) model to a real live facility, nor uses it as a neighbour', async () => {
+  it('never applies the research model to a facility of another source, nor uses it as a neighbour', async () => {
     await fixtures();
     await prisma.parkingFacility.update({ where: { id: 'osm' }, data: { availabilityMode: 'LIVE' } });
     await series('z_osm', Array(24).fill(0.8));
@@ -116,17 +131,17 @@ describe('GET /api/parking/:id/predictions', () => {
     expect(live.body).toMatchObject({ status: 'NO_MODEL', message: 'Prediction unavailable — no model has been trained for this area yet.', model: null, zones: [] });
     expect(requests.filter((r) => r.path === '/predict')).toHaveLength(0);
 
-    // The live zone (~110 m away) is inside the model radius but must not feed the simulation zone's model.
+    // The live zone (111 m) is a listed neighbour inside the model radius but must not feed the replay zone's model.
     await request(app).get('/api/parking/a/predictions');
     const sent = requests.find((r) => r.path === '/predict')!;
     expect(sent.body.neighbours.every((n: { history: (number | null)[] }) => !n.history.includes(0.8))).toBe(true);
   });
 
-  it('is unavailable when a simulated facility has no snapshots, and stale when data is old', async () => {
+  it('is unavailable when a replay facility has no snapshots, and stale when data is old', async () => {
     await fixtures();
     expect((await request(app).get('/api/parking/a/predictions')).body.status).toBe('INSUFFICIENT_DATA');
     await prisma.occupancySnapshot.create({
-      data: { zoneId: 'z_a', observedAt: new Date(Date.now() - 3 * 3_600_000), occupied: 5, capacity: 20, available: 15, occupancy: 0.25, sourceType: 'SIMULATION' },
+      data: { zoneId: 'z_a', observedAt: new Date(Date.now() - 3 * 3_600_000), occupied: 5, capacity: 20, available: 15, occupancy: 0.25, sourceType: 'HISTORICAL_DATA' },
     });
     const stale = await request(app).get('/api/parking/a/predictions');
     expect(stale.body).toMatchObject({ status: 'STALE', message: 'Prediction unavailable — occupancy data is out of date.' });
@@ -152,7 +167,7 @@ describe('GET /api/parking/:id/predictions', () => {
     expect(res.body.status).toBe('AVAILABLE');
     expect(res.body.model.id).toBe('spatial_temporal-hgb-v1');
     const zone = res.body.zones[0];
-    expect(zone.isSimulated).toBe(true);
+    expect(zone.isSimulated).toBe(false);
     expect(zone.currentOccupancy).toBeCloseTo(0.73);
     expect(zone.predictions.map((p: any) => p.horizonMinutes)).toEqual([5, 15]);
     expect(zone.predictions[1].predictedOccupancy).toBeCloseTo(0.76);
@@ -163,7 +178,7 @@ describe('GET /api/parking/:id/predictions', () => {
     expect(sent.history.at(-1)).toBeCloseTo(0.73);
     expect(sent.history.at(-25)).toBeNull(); // before the first snapshot: unknown, not filled
     expect(sent.observedBays).toBe(20);
-    expect(sent.neighbours).toHaveLength(1); // b only: c is beyond 400 m, osm has no availability source
+    expect(sent.neighbours).toHaveLength(1); // b only: c is beyond 400 m, osm is not replay data
     expect(sent.neighbours[0].distanceM).toBeGreaterThan(200);
     expect(sent.neighbours[0].history.at(-1)).toBeCloseTo(0.7);
     expect(sent.timestamp).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:00$/);
@@ -182,7 +197,7 @@ describe('prediction evaluation', () => {
     await request(app).get('/api/parking/a/predictions');
     const p = await prisma.prediction.findFirstOrThrow({ where: { zoneId: 'z_a', horizonMinutes: 5 } });
     await prisma.occupancySnapshot.create({
-      data: { zoneId: 'z_a', observedAt: new Date(p.targetTime.getTime() + 60_000), occupied: 12, capacity: 20, available: 8, occupancy: 0.6, sourceType: 'SIMULATION' },
+      data: { zoneId: 'z_a', observedAt: new Date(p.targetTime.getTime() + 60_000), occupied: 12, capacity: 20, available: 8, occupancy: 0.6, sourceType: 'HISTORICAL_DATA' },
     });
     expect(await evaluateDuePredictions(new Date(p.targetTime.getTime() + 120_000))).toBe(1);
     const done = await prisma.prediction.findUniqueOrThrow({ where: { id: p.id } });
@@ -195,9 +210,9 @@ describe('prediction evaluation', () => {
     const end = floorToStep(new Date());
     await prisma.occupancySnapshot.createMany({
       data: [
-        { zoneId: 'z_a', observedAt: new Date(end.getTime() - 240_000), occupancy: 0.2, sourceType: 'SIMULATION' },
-        { zoneId: 'z_a', observedAt: new Date(end.getTime() - 60_000), occupancy: 0.4, sourceType: 'SIMULATION' },
-        { zoneId: 'z_a', observedAt: new Date(end.getTime() - 900_000), occupancy: 0.9, sourceType: 'SIMULATION' },
+        { zoneId: 'z_a', observedAt: new Date(end.getTime() - 240_000), occupancy: 0.2, sourceType: 'HISTORICAL_DATA' },
+        { zoneId: 'z_a', observedAt: new Date(end.getTime() - 60_000), occupancy: 0.4, sourceType: 'HISTORICAL_DATA' },
+        { zoneId: 'z_a', observedAt: new Date(end.getTime() - 900_000), occupancy: 0.9, sourceType: 'HISTORICAL_DATA' },
       ],
     });
     const h = (await gridHistories(['z_a'], end, 5)).get('z_a')!;
@@ -206,61 +221,71 @@ describe('prediction evaluation', () => {
   });
 });
 
+async function event(zoneId: string, startMinAgo: number, endMinAgo: number | null) {
+  const end = floorToStep(new Date());
+  return prisma.saturationEvent.create({
+    data: {
+      zoneId, threshold: 0.9, peakOccupancy: 0.95,
+      startedAt: new Date(end.getTime() - startMinAgo * 60_000),
+      endedAt: endMinAgo == null ? null : new Date(end.getTime() - endMinAgo * 60_000),
+    },
+  });
+}
+
 describe('spillover', () => {
-  it('records a saturation event, warns about predicted pressure nearby and explains alternatives', async () => {
+  it('reports the active saturation event, warns about predicted pressure nearby and explains alternatives', async () => {
     await fixtures();
     await series('z_a', Array(24).fill(0.95)); // origin saturated
     await series('z_b', Array.from({ length: 24 }, (_, i) => 0.6 + i * 0.01)); // rising towards 0.83 -> predicted 0.86
     await series('z_c', Array(24).fill(0.3));
+    await event('z_a', 30, null);
 
     const res = await request(app).get('/api/spillover/predictions').query({ facilityId: 'a' });
     expect(res.status).toBe(200);
     expect(res.body.origin.pressureLevel).toBe('SATURATED');
     expect(res.body.spilloverContext).toBe(true);
-    expect(res.body.origin.activeSaturationEvent).toMatchObject({ zoneId: 'z_a', threshold: 0.9, isSimulated: true });
+    expect(res.body.neighbourRadiusMeters).toBe(400);
+    expect(res.body.origin.activeSaturationEvent).toMatchObject({ zoneId: 'z_a', threshold: 0.9 });
+    expect(res.body.origin.predictions.status).toBe('AVAILABLE');
     expect(res.body.warnings.map((w: any) => w.facilityId)).toEqual(['b']);
-    expect(res.body.warnings[0].message).toMatch(/^Parking pressure is likely to increase around b: predicted occupancy 86% in 15 min/);
+    expect(res.body.warnings[0].message).toMatch(/^Parking pressure is predicted to increase around b: predicted occupancy 86% in 15 min/);
     expect(res.body.warnings[0].message).not.toMatch(/will/i);
     // b is warned about (pressure predicted to rise), so it must not also be recommended as an alternative
     expect(res.body.alternatives.map((a: any) => a.id)).toEqual(['c']);
     expect(res.body.alternatives[0].reason).toMatch(/14 spaces currently available, predicted occupancy 33% in 15 min, 0\.7 km away/);
     expect(res.body.neighbours.find((n: any) => n.id === 'osm').predictionStatus).toBe('INSUFFICIENT_DATA');
-
-    const events = await request(app).get('/api/spillover/events').query({ active: 'true' });
-    expect(events.body.total).toBe(1);
-    expect(events.body.items[0].facility.id).toBe('a');
   });
 
-  it('treats re-saturation within 30 minutes as the same event', async () => {
-    await fixtures();
-    const t0 = floorToStep(new Date(Date.now() - 20 * 60_000));
-    const snap = (min: number, occupancy: number) =>
-      prisma.occupancySnapshot.create({ data: { zoneId: 'z_a', observedAt: new Date(t0.getTime() + min * 60_000), occupancy, occupied: Math.round(occupancy * 20), capacity: 20, sourceType: 'SIMULATION' } });
-    await snap(0, 0.95);
-    await request(app).get('/api/spillover/events');
-    await snap(5, 0.85); // dips below
-    await request(app).get('/api/spillover/events');
-    await snap(10, 0.95); // back within 30 min
-    const res = await request(app).get('/api/spillover/events');
-    expect(res.body.total).toBe(1);
-    expect(res.body.items[0].endedAt).toBeNull();
-  });
-
-  it('closes the event when occupancy drops below the threshold', async () => {
+  it('an event is active only between its start and end at the replay clock', async () => {
     await fixtures();
     await series('z_a', [0.95]);
-    await request(app).get('/api/spillover/events');
-    await prisma.occupancySnapshot.create({
-      data: { zoneId: 'z_a', observedAt: new Date(Date.now() + 1000), occupied: 10, capacity: 20, available: 10, occupancy: 0.5, sourceType: 'SIMULATION' },
-    });
-    const res = await request(app).get('/api/spillover/events').query({ active: 'false' });
-    // the future-dated snapshot is ignored until it is observed
-    expect(res.body.total).toBe(0);
+    await event('z_a', 60, 30); // ended 30 min ago
+    await event('z_a', 10, null);
+    await event('z_b', -30, null); // starts in the future of the replay clock
+    const res = await request(app).get('/api/spillover/events');
+    expect(res.body.total).toBe(3);
+    expect(res.body.items.map((e: any) => e.activeAtReplayTime)).toEqual([false, true, false]);
+    const sp = await request(app).get('/api/spillover/predictions').query({ facilityId: 'b' });
+    expect(sp.body.origin.activeSaturationEvent).toBeNull();
+  });
+
+  it('navigates to the next / previous event and filters by neighbours', async () => {
+    await fixtures();
+    const e1 = await event('z_a', 120, 100);
+    const e2 = await event('z_c', 60, 50); // c has no neighbour pairs of its own
+    const e3 = await event('z_a', 30, 20);
+    const nav = async (q: Record<string, string>) => (await request(app).get('/api/spillover/events/adjacent').query(q)).body.event?.id ?? null;
+    expect(await nav({ direction: 'previous' })).toBe(e3.id);
+    expect(await nav({ direction: 'next', eventId: e1.id })).toBe(e2.id);
+    expect(await nav({ direction: 'next', eventId: e1.id, withNeighbours: 'true' })).toBe(e3.id);
+    expect(await nav({ direction: 'previous', eventId: e1.id })).toBeNull();
+    expect((await request(app).get(`/api/spillover/events/${e2.id}`)).body.event.zone.neighbourCount).toBe(0);
+    expect((await request(app).get('/api/spillover/events/nope')).status).toBe(404);
   });
 
   it('ranking excludes closed, saturated and unavailable facilities and weighs distance', () => {
     const base = { type: 'PUBLIC', latitude: 0, longitude: 0, predictionStatus: 'AVAILABLE' as const };
-    const avail = (occupancy: number, available: number) => ({ state: 'SIMULATED' as const, occupancy, available, message: '', occupied: null, capacity: null, observedAt: null, ageMinutes: 1, sourceType: null });
+    const avail = (occupancy: number, available: number) => ({ state: 'REPLAY' as const, occupancy, available, message: '', occupied: null, capacity: null, observedAt: null, ageMinutes: 1, sourceType: null });
     const ranked = rankAlternatives(
       [
         { ...base, id: 'closed', displayName: 'closed', distanceMeters: 100, openNow: false, availability: avail(0.1, 50), predicted: null },
@@ -299,5 +324,79 @@ describe('analytics', () => {
     const res = await admin.get('/api/analytics/prediction-errors');
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ total: 0, items: [] });
+  });
+});
+
+describe('predicted vs actual', () => {
+  it('returns every model\'s prediction per base time next to the recorded outcome and persistence', async () => {
+    await fixtures();
+    const values = Array.from({ length: 30 }, (_, i) => 0.4 + i * 0.01);
+    await series('z_a', values);
+    await series('z_b', Array(30).fill(0.7));
+    const end = floorToStep(new Date());
+    const from = new Date(end.getTime() - 20 * 60_000); // base times -20..-15 min: 15-min targets are recorded
+    const to = new Date(end.getTime() - 15 * 60_000);
+    const res = await request(app).get('/api/analytics/predicted-vs-actual').query({ facilityId: 'a', from: from.toISOString(), to: to.toISOString() });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('AVAILABLE');
+    const h15 = res.body.result.horizons.find((h: any) => h.horizonMinutes === 15);
+    expect(h15.points).toHaveLength(2);
+    const [p0] = h15.points;
+    expect(p0.persistence).toBeCloseTo(values[25]);
+    expect(p0.actual).toBeCloseTo(values[28]);
+    expect(p0.predicted['spatial_temporal-hgb-v1']).toBeCloseTo(values[25] + 0.03);
+    expect(p0.predicted['temporal-hgb-v1']).toBeCloseTo(values[25] + 0.03);
+    // the temporal model gets no neighbours; the spatial-temporal one gets b
+    const sent = requests.filter((r) => r.path === '/predict').map((r) => r.body);
+    expect(sent.find((b) => b.model === 'temporal-hgb-v1').neighbours).toHaveLength(0);
+    expect(sent.find((b) => b.model === 'spatial_temporal-hgb-v1').neighbours).toHaveLength(1);
+    // cached: a second call does not call the ML service again
+    const before = requests.length;
+    await request(app).get('/api/analytics/predicted-vs-actual').query({ facilityId: 'a', from: from.toISOString(), to: to.toISOString() });
+    expect(requests.filter((r) => r.path === '/predict').length).toBe(sent.length);
+    expect(requests.length).toBeGreaterThanOrEqual(before);
+  });
+
+  it('reports a missing actual as null and rejects oversized windows', async () => {
+    await fixtures();
+    await series('z_a', Array(20).fill(0.5));
+    const end = floorToStep(new Date());
+    const res = await request(app).get('/api/analytics/predicted-vs-actual').query({ facilityId: 'a', from: end.toISOString(), to: end.toISOString() });
+    const h15 = res.body.result.horizons.find((h: any) => h.horizonMinutes === 15);
+    expect(h15.points[0].actual).toBeNull();
+    const big = await request(app).get('/api/analytics/predicted-vs-actual').query({ facilityId: 'a', from: new Date(end.getTime() - 5 * 3_600_000).toISOString(), to: end.toISOString() });
+    expect(big.status).toBe(400);
+    expect((await request(app).get('/api/analytics/predicted-vs-actual').query({ facilityId: 'osm', from: end.toISOString(), to: end.toISOString() })).body.status).toBe('NO_MODEL');
+  });
+});
+
+describe('replay clock', () => {
+  const range = { start: '2019-11-01T00:00:00Z', end: '2019-11-02T00:00:00Z', timezone: 'Australia/Melbourne', dataset: 'test' };
+
+  it('is not configured without a loaded replay', async () => {
+    const res = await request(app).get('/api/replay');
+    expect(res.body.mode).toBe('NOT_CONFIGURED');
+    expect((await request(app).post('/api/replay').set(CSRF).send({ playing: false })).status).toBe(409);
+  });
+
+  it('seeks within the range, pauses, and every current value follows the clock', async () => {
+    await fixtures();
+    await setReplayRange(range);
+    clearReplayCache();
+    const at = (iso: string, occupancy: number) =>
+      prisma.occupancySnapshot.create({ data: { zoneId: 'z_a', observedAt: new Date(iso), occupancy, occupied: Math.round(occupancy * 20), capacity: 20, available: 20 - Math.round(occupancy * 20), sourceType: 'HISTORICAL_DATA' } });
+    await at('2019-11-01T02:00:00Z', 0.5);
+    await at('2019-11-01T03:00:00Z', 0.95);
+
+    expect((await request(app).post('/api/replay').set(CSRF).send({ at: '2019-12-01T00:00:00Z' })).status).toBe(400);
+    const seek = await request(app).post('/api/replay').set(CSRF).send({ at: '2019-11-01T02:02:00Z', playing: false });
+    expect(seek.body).toMatchObject({ mode: 'HISTORICAL_REPLAY', now: '2019-11-01T02:00:00.000Z', playing: false });
+    let a = (await request(app).get('/api/parking/a')).body.facility;
+    expect(a.availability).toMatchObject({ state: 'REPLAY', occupancy: 0.5 });
+
+    await request(app).post('/api/replay').set(CSRF).send({ at: '2019-11-01T03:00:00Z' });
+    a = (await request(app).get('/api/parking/a')).body.facility;
+    expect(a.availability.occupancy).toBeCloseTo(0.95);
+    expect(a.pressureLevel).toBe('SATURATED');
   });
 });

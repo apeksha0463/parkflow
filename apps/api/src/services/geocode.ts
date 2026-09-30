@@ -1,13 +1,14 @@
 /**
- * Destination search.
- *  - suggest: our own Locality table (OSM place names), fast trigram match. Used while typing.
- *  - full:    localities + Nominatim geocoding bounded to Bengaluru. Used on explicit submit only,
+ * Location search for the Melbourne map.
+ *  - suggest: our own sensor zones (street descriptions from the City of Melbourne data). Used while typing.
+ *  - full:    zones + Nominatim geocoding bounded to Greater Melbourne. Used on explicit submit only,
  *             because Nominatim's usage policy forbids autocomplete. Throttled to 1 req/s and cached.
  */
 import { config } from '../config.js';
 import { prisma } from '../lib/db.js';
 
-export const BENGALURU_VIEWBOX = { west: 77.43, south: 12.83, east: 77.8, north: 13.15 };
+/** Search bounds for the geocoder: Greater Melbourne (west, south, east, north). */
+export const MELBOURNE_VIEWBOX = { west: 144.55, south: -38.2, east: 145.45, north: -37.55 };
 
 export interface SearchResult {
   id: string;
@@ -15,30 +16,27 @@ export interface SearchResult {
   sublabel: string | null;
   latitude: number;
   longitude: number;
-  kind: 'locality' | 'place';
+  kind: 'zone' | 'place';
   source: string;
 }
 
-export async function searchLocalities(q: string, limit = 6): Promise<SearchResult[]> {
+/** Sensor zones whose street description or area matches the query. */
+export async function searchZones(q: string, limit = 6): Promise<SearchResult[]> {
   const needle = q.trim().toLowerCase();
-  const rows = await prisma.$queryRaw<{ id: string; name: string; placeType: string; latitude: number; longitude: number }[]>`
-    SELECT id, name, "placeType", latitude, longitude
-      FROM "Locality"
-     WHERE lower(name) LIKE ${needle + '%'} OR lower(name) LIKE ${'% ' + needle + '%'} OR lower(name) % ${needle}
-     ORDER BY (lower(name) = ${needle}) DESC,
-              (lower(name) LIKE ${needle + '%'}) DESC,
-              CASE "placeType" WHEN 'suburb' THEN 0 WHEN 'quarter' THEN 1 ELSE 2 END,
-              similarity(lower(name), ${needle}) DESC,
-              name
+  const rows = await prisma.$queryRaw<{ id: string; name: string; area: string | null; latitude: number; longitude: number }[]>`
+    SELECT f.id, f.name, f.area, f.latitude, f.longitude
+      FROM "ParkingFacility" f
+     WHERE f.name IS NOT NULL AND (lower(f.name) LIKE ${'%' + needle + '%'} OR lower(coalesce(f.area, '')) LIKE ${needle + '%'})
+     ORDER BY (lower(f.name) LIKE ${needle + '%'}) DESC, f.name
      LIMIT ${limit}`;
   return rows.map((r) => ({
-    id: `locality:${r.id}`,
+    id: `zone:${r.id}`,
     label: r.name,
-    sublabel: `${r.placeType[0].toUpperCase()}${r.placeType.slice(1)}, Bengaluru`,
+    sublabel: r.area ? `Sensor zone · ${r.area}` : 'Sensor zone',
     latitude: r.latitude,
     longitude: r.longitude,
-    kind: 'locality',
-    source: 'OpenStreetMap localities',
+    kind: 'zone',
+    source: 'City of Melbourne parking sensors',
   }));
 }
 
@@ -83,8 +81,8 @@ export async function searchNominatim(q: string, fetchImpl: typeof fetch = fetch
   const params = new URLSearchParams({
     q: key,
     format: 'jsonv2',
-    countrycodes: 'in',
-    viewbox: `${BENGALURU_VIEWBOX.west},${BENGALURU_VIEWBOX.north},${BENGALURU_VIEWBOX.east},${BENGALURU_VIEWBOX.south}`,
+    countrycodes: 'au',
+    viewbox: `${MELBOURNE_VIEWBOX.west},${MELBOURNE_VIEWBOX.north},${MELBOURNE_VIEWBOX.east},${MELBOURNE_VIEWBOX.south}`,
     bounded: '1',
     limit: '6',
   });
@@ -128,8 +126,8 @@ export function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: n
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-export function mergeResults(localities: SearchResult[], places: SearchResult[], limit = 8): SearchResult[] {
-  const out = [...localities];
+export function mergeResults(zones: SearchResult[], places: SearchResult[], limit = 8): SearchResult[] {
+  const out = [...zones];
   for (const p of places) {
     const dup = out.some((o) => o.label.toLowerCase() === p.label.toLowerCase() && distanceMeters(o.latitude, o.longitude, p.latitude, p.longitude) < 1500);
     if (!dup) out.push(p);

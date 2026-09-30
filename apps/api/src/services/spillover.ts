@@ -1,8 +1,10 @@
 /**
  * Saturation tracking and spillover warnings.
  *
- * - Zone saturation state and SaturationEvent rows are derived from the latest occupancy snapshots
- *   using the admin-configured thresholds.
+ * - SaturationEvent rows are the research-defined events of the replayed history (seed-melbourne.ts):
+ *   saturated after >= 30 min known and below the threshold. The event "active" at the replay clock is the
+ *   one that started at or before it and had not ended.
+ * - Neighbours are the research neighbour pairs (200 m) the spatial-temporal model was trained with.
  * - Warnings describe *predicted* pressure in neighbouring zones; they never state that drivers move
  *   between zones or that a zone "will" fill.
  * - Alternatives are ranked from current availability, predicted occupancy (when available) and distance,
@@ -10,61 +12,13 @@
  */
 import { prisma } from '../lib/db.js';
 import { getSettings, type Settings } from './settings.js';
-import { availabilityFor, displayName, isOpenNow, type AvailabilitySummary } from './facilities.js';
+import { availabilityFor, displayName, isCurrent, isOpenNow, type AvailabilitySummary } from './facilities.js';
 import { facilityPredictions, pressureLevel, type FacilityPredictions } from './predictions.js';
+import { getRegistry, MlUnavailableError } from './ml.js';
 
 export const WARNING_HORIZON_MIN = 15;
-/** Matches EVENT_MIN_BELOW_MINUTES in the ML pipeline. */
-const EVENT_DEBOUNCE_MS = 30 * 60_000;
 /** Distance penalty in the ranking: +0.1 occupancy-equivalent per km. */
 const DISTANCE_WEIGHT_PER_KM = 0.1;
-
-/** Updates zone states and opens/closes saturation events from each zone's latest snapshot. */
-export async function syncSaturation(now: Date = new Date()): Promise<{ opened: number; closed: number }> {
-  const s = await getSettings();
-  const latest = await prisma.$queryRaw<{ zoneId: string; observedAt: Date; occupancy: number; sourceType: string; state: string }[]>`
-    SELECT DISTINCT ON (sn."zoneId") sn."zoneId", sn."observedAt", sn.occupancy, sn."sourceType", z."saturationState"::text AS state
-      FROM "OccupancySnapshot" sn
-      JOIN "ParkingZone" z ON z.id = sn."zoneId"
-      JOIN "ParkingFacility" f ON f.id = z."facilityId" AND f."availabilityMode" <> 'NONE'
-     WHERE sn."observedAt" <= ${now}
-     ORDER BY sn."zoneId", sn."observedAt" DESC`;
-  let opened = 0;
-  let closed = 0;
-  for (const r of latest) {
-    const state = pressureLevel(r.occupancy, s)!;
-    if (state !== r.state) {
-      await prisma.parkingZone.update({ where: { id: r.zoneId }, data: { saturationState: state as 'NORMAL' } });
-    }
-    const open = await prisma.saturationEvent.findFirst({ where: { zoneId: r.zoneId, endedAt: null } });
-    if (state === 'SATURATED') {
-      // Same rule as the research pipeline: re-saturating within 30 min of an event ending is the same event.
-      const recent = open
-        ? null
-        : await prisma.saturationEvent.findFirst({
-            where: { zoneId: r.zoneId, endedAt: { gte: new Date(r.observedAt.getTime() - EVENT_DEBOUNCE_MS) } },
-            orderBy: { endedAt: 'desc' },
-          });
-      if (recent) {
-        await prisma.saturationEvent.update({
-          where: { id: recent.id },
-          data: { endedAt: null, peakOccupancy: Math.max(recent.peakOccupancy, r.occupancy) },
-        });
-      } else if (!open) {
-        await prisma.saturationEvent.create({
-          data: { zoneId: r.zoneId, startedAt: r.observedAt, peakOccupancy: r.occupancy, threshold: s.saturationThreshold, isSimulated: r.sourceType === 'SIMULATION' },
-        });
-        opened++;
-      } else if (r.occupancy > open.peakOccupancy) {
-        await prisma.saturationEvent.update({ where: { id: open.id }, data: { peakOccupancy: r.occupancy } });
-      }
-    } else if (open && r.observedAt > open.startedAt) {
-      await prisma.saturationEvent.update({ where: { id: open.id }, data: { endedAt: r.observedAt } });
-      closed++;
-    }
-  }
-  return { opened, closed };
-}
 
 interface Candidate {
   id: string;
@@ -91,8 +45,7 @@ const pct = (x: number) => `${Math.round(x * 100)}%`;
 export function rankAlternatives(cands: Candidate[], s: Settings) {
   const usable = cands.filter((c) => {
     if (c.openNow === false) return false;
-    const current = c.availability.state === 'LIVE' || c.availability.state === 'SIMULATED';
-    if (!current || c.availability.occupancy == null) return false;
+    if (!isCurrent(c.availability.state) || c.availability.occupancy == null) return false;
     if (c.availability.occupancy >= s.saturationThreshold) return false;
     if (c.predicted && c.predicted.predictedOccupancy >= s.saturationThreshold) return false;
     return true;
@@ -112,68 +65,79 @@ export function rankAlternatives(cands: Candidate[], s: Settings) {
     .sort((a, b) => a.score - b.score);
 }
 
-/** Warnings and alternatives around a facility, based on its neighbours' current and predicted state. */
-export async function spilloverAround(facilityId: string) {
+/** The saturation event of a zone that is in progress at `now` (started at or before, not yet ended). */
+export async function activeEventAt(zoneIds: string[], now: Date) {
+  return prisma.saturationEvent.findFirst({
+    where: { zoneId: { in: zoneIds }, startedAt: { lte: now }, OR: [{ endedAt: null }, { endedAt: { gt: now } }] },
+    orderBy: { startedAt: 'desc' },
+  });
+}
+
+/** Warnings and alternatives around a facility at the replay instant `now`. */
+export async function spilloverAround(facilityId: string, now: Date) {
   const s = await getSettings();
   const origin = await prisma.parkingFacility.findUnique({ where: { id: facilityId }, select: { id: true, availabilityMode: true, zones: { select: { id: true } } } });
   if (!origin) return null;
+  const zoneIds = origin.zones.map((z) => z.id);
 
-  const originAvail = (await availabilityFor([origin], s.staleAfterMinutes)).get(origin.id)!;
-  const activeEvent = await prisma.saturationEvent.findFirst({
-    where: { zoneId: { in: origin.zones.map((z) => z.id) }, endedAt: null },
-    orderBy: { startedAt: 'desc' },
+  const originAvail = (await availabilityFor([origin], s.staleAfterMinutes, now)).get(origin.id)!;
+  const activeEvent = await activeEventAt(zoneIds, now);
+  const originPredictions = origin.availabilityMode === 'NONE' ? null : await facilityPredictions(origin.id, now);
+
+  // Research neighbour pairs of the facility's zones, nearest first; one row per neighbouring facility.
+  const pairs = await prisma.zoneNeighbour.findMany({
+    where: { zoneId: { in: zoneIds } },
+    orderBy: { distanceM: 'asc' },
+    select: { distanceM: true, neighbour: { select: { facilityId: true } } },
   });
+  const distanceOf = new Map<string, number>();
+  for (const p of pairs) if (!distanceOf.has(p.neighbour.facilityId) && p.neighbour.facilityId !== facilityId) distanceOf.set(p.neighbour.facilityId, p.distanceM);
+  const neighbourRadiusMeters = await researchRadius();
 
-  const rows = await prisma.$queryRaw<{ id: string; distance: number }[]>`
-    SELECT n.id, ST_Distance(n.location, f.location) AS distance
-      FROM "ParkingFacility" f
-      JOIN "ParkingFacility" n ON n.id <> f.id AND ST_DWithin(n.location, f.location, ${s.neighbourRadiusMeters})
-     WHERE f.id = ${facilityId}
-     ORDER BY distance
-     LIMIT 20`;
-  const facilities = await prisma.parkingFacility.findMany({ where: { id: { in: rows.map((r) => r.id) } } });
+  const facilities = await prisma.parkingFacility.findMany({ where: { id: { in: [...distanceOf.keys()] } } });
   const byId = new Map(facilities.map((f) => [f.id, f]));
-  const avail = await availabilityFor(facilities, s.staleAfterMinutes);
+  const avail = await availabilityFor(facilities, s.staleAfterMinutes, now);
 
   const candidates: Candidate[] = [];
-  for (const r of rows) {
-    const f = byId.get(r.id)!;
+  for (const [id, distance] of distanceOf) {
+    const f = byId.get(id)!;
     const a = avail.get(f.id)!;
-    const preds = f.availabilityMode === 'NONE' ? null : await facilityPredictions(f.id);
+    const preds = f.availabilityMode === 'NONE' ? null : await facilityPredictions(f.id, now);
     candidates.push({
       id: f.id,
       ...displayName(f.name, f.type, f.area),
       type: f.type,
       latitude: f.latitude,
       longitude: f.longitude,
-      distanceMeters: Math.round(r.distance),
-      openNow: isOpenNow(f.operatingHours),
+      distanceMeters: Math.round(distance),
+      openNow: isOpenNow(f.operatingHours, now),
       availability: a,
       predicted: horizonPrediction(preds),
       predictionStatus: preds?.status ?? 'INSUFFICIENT_DATA',
     });
   }
 
-  const originPressure = originAvail.occupancy != null && (originAvail.state === 'LIVE' || originAvail.state === 'SIMULATED')
-    ? pressureLevel(originAvail.occupancy, s)
-    : null;
+  const originPressure = originAvail.occupancy != null && isCurrent(originAvail.state) ? pressureLevel(originAvail.occupancy, s) : null;
   const warnings = candidates
     .filter((c) => c.predicted && c.availability.occupancy != null && c.predicted.predictedOccupancy >= s.approachingThreshold && c.predicted.predictedOccupancy > c.availability.occupancy)
     .map((c) => ({
       facilityId: c.id,
       displayName: c.displayName,
+      distanceMeters: c.distanceMeters,
       currentOccupancy: c.availability.occupancy,
       predictedOccupancy: c.predicted!.predictedOccupancy,
       horizonMinutes: c.predicted!.horizonMinutes,
-      message: `Parking pressure is likely to increase around ${c.displayName}: predicted occupancy ${pct(c.predicted!.predictedOccupancy)} in ${c.predicted!.horizonMinutes} min (currently ${pct(c.availability.occupancy!)}).`,
+      message: `Parking pressure is predicted to increase around ${c.displayName}: predicted occupancy ${pct(c.predicted!.predictedOccupancy)} in ${c.predicted!.horizonMinutes} min (currently ${pct(c.availability.occupancy!)}).`,
     }));
   const warnedIds = new Set(warnings.map((w) => w.facilityId));
 
   return {
     facilityId,
+    at: now.toISOString(),
     thresholds: { saturation: s.saturationThreshold, approaching: s.approachingThreshold },
-    neighbourRadiusMeters: s.neighbourRadiusMeters,
-    origin: { availability: originAvail, pressureLevel: originPressure, activeSaturationEvent: activeEvent },
+    neighbourRadiusMeters,
+    warningHorizonMinutes: WARNING_HORIZON_MIN,
+    origin: { availability: originAvail, pressureLevel: originPressure, activeSaturationEvent: activeEvent, predictions: originPredictions },
     // Only raised when the origin is at/near saturation — otherwise there is no spillover context.
     spilloverContext: originPressure === 'SATURATED' || originPressure === 'APPROACHING_SATURATION',
     warnings,
@@ -182,4 +146,15 @@ export async function spilloverAround(facilityId: string) {
     neighbours: candidates,
     provenance: { current: originAvail.state, predictions: 'PREDICTED' },
   };
+}
+
+/** The neighbour radius the active model was trained with; null when the ML service is unreachable. */
+async function researchRadius(): Promise<number | null> {
+  try {
+    const r = await getRegistry();
+    return (r.models.find((m) => m.id === r.active) ?? r.models[0])?.config.neighbour_radius_m ?? null;
+  } catch (err) {
+    if (err instanceof MlUnavailableError) return null;
+    throw err;
+  }
 }

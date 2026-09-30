@@ -26,7 +26,7 @@ export type Settings = z.infer<typeof SettingsSchema>;
 export const DEFAULT_SETTINGS: Settings = {
   saturationThreshold: 0.9,
   approachingThreshold: 0.8,
-  neighbourRadiusMeters: 800,
+  neighbourRadiusMeters: 200,
   staleAfterMinutes: 30,
 };
 

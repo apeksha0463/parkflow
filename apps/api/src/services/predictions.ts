@@ -1,13 +1,13 @@
 /**
  * Short-term occupancy predictions for parking zones.
  *
- * A prediction is only requested when a zone has recent occupancy snapshots (live or clearly-labelled
- * simulation). Otherwise the response says why no prediction exists; nothing is ever estimated here.
- * Model inputs are built from stored snapshots on the model's 5-minute grid; neighbours are other zones
- * within the radius the model was trained with (read from the model metadata).
+ * A prediction is only requested when a zone has recent occupancy snapshots at the replay clock. Otherwise
+ * the response says why no prediction exists; nothing is ever estimated here.
+ * Model inputs are built from stored snapshots on the model's 5-minute grid; neighbours are the research
+ * neighbour pairs (ZoneNeighbour, from the pipeline's neighbours.csv) within the model's trained radius.
  *
- * The only trained model uses the Melbourne 2019 research dataset, so predictions are served ONLY for
- * clearly-labelled simulation zones. A real (LIVE) Bengaluru facility gets NO_MODEL, never Melbourne output.
+ * The models are trained on the Melbourne 2019 sensor dataset, so predictions are served ONLY for zones
+ * replaying that dataset (availabilityMode REPLAY). Any other facility gets NO_MODEL.
  */
 import { prisma } from '../lib/db.js';
 import { getSettings } from './settings.js';
@@ -64,10 +64,15 @@ export function pressureLevel(occupancy: number | null, s: { saturationThreshold
 
 export const floorToStep =(d: Date) => new Date(Math.floor(d.getTime() / STEP_MS) * STEP_MS);
 
-/** Local wall-clock ISO string (process TZ, Asia/Kolkata) — the model's time features are wall-clock based. */
+export const DATA_TIMEZONE = 'Australia/Melbourne';
+const wallFormat = new Intl.DateTimeFormat('en-CA', {
+  timeZone: DATA_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+});
+
+/** Melbourne wall-clock ISO string — the model's time features are local wall-clock based, as in training. */
 export function wallClock(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:00`;
+  const p = Object.fromEntries(wallFormat.formatToParts(d).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:00`;
 }
 
 /**
@@ -91,22 +96,23 @@ export async function gridHistories(zoneIds: string[], end: Date, steps = HISTOR
   return out;
 }
 
-async function neighbourZones(zoneId: string, radiusM: number) {
-  return prisma.$queryRaw<{ id: string; distance: number }[]>`
-    SELECT n.id, ST_Distance(n.location, z.location) AS distance
-      FROM "ParkingZone" z
-      JOIN "ParkingZone" n ON n.id <> z.id AND ST_DWithin(n.location, z.location, ${radiusM})
-      JOIN "ParkingFacility" f ON f.id = n."facilityId" AND f."availabilityMode" = 'SIMULATION'
-     WHERE z.id = ${zoneId}
-     ORDER BY distance
-     LIMIT 50`;
+/** Research neighbours of a zone within the model's radius, nearest first. */
+export async function neighbourZones(zoneId: string, radiusM: number) {
+  const rows = await prisma.zoneNeighbour.findMany({
+    // Only zones replaying the same dataset can be model inputs.
+    where: { zoneId, distanceM: { lte: radiusM }, neighbour: { facility: { availabilityMode: 'REPLAY' } } },
+    orderBy: { distanceM: 'asc' },
+    take: 50,
+    select: { neighbourId: true, distanceM: true },
+  });
+  return rows.map((r) => ({ id: r.neighbourId, distance: r.distanceM }));
 }
 
-function activeModel(registry: Registry): ModelMeta {
+export function activeModel(registry: Registry): ModelMeta {
   return registry.models.find((m) => m.id === registry.active) ?? registry.models[0];
 }
 
-async function ensureModelVersion(meta: ModelMeta) {
+async function ensureModelVersion(meta: ModelMeta, isActive: boolean) {
   await prisma.modelVersion.upsert({
     where: { id: meta.id },
     create: {
@@ -118,18 +124,17 @@ async function ensureModelVersion(meta: ModelMeta) {
       featureVersion: meta.feature_version,
       horizonsMinutes: meta.horizons_minutes,
       metrics: meta.test_metrics as object,
-      isActive: true,
+      isActive,
     },
-    update: { isActive: true },
+    update: { isActive },
   });
-  await prisma.modelVersion.updateMany({ where: { id: { not: meta.id } }, data: { isActive: false } });
 }
 
 export async function predictZone(
   zone: { id: string; name: string },
   meta: ModelMeta,
   settings: { saturationThreshold: number; approachingThreshold: number },
-  now: Date = new Date(),
+  now: Date,
 ): Promise<ZonePrediction | 'INSUFFICIENT_DATA'> {
   const latest = await prisma.occupancySnapshot.findFirst({ where: { zoneId: zone.id, observedAt: { lte: now } }, orderBy: { observedAt: 'desc' } });
   if (!latest || latest.capacity == null || latest.capacity <= 0) return 'INSUFFICIENT_DATA';
@@ -178,7 +183,7 @@ export async function predictZone(
     throw err;
   }
 
-  await ensureModelVersion(meta);
+  await ensureModelVersion(meta, true);
   const predictions = result.predictions.map((p) => ({ ...p, targetTime: new Date(end.getTime() + p.horizonMinutes * 60_000) }));
   await prisma.prediction.createMany({
     data: predictions.map((p) => ({
@@ -209,15 +214,15 @@ export async function predictZone(
   };
 }
 
-export async function facilityPredictions(facilityId: string, now: Date = new Date()): Promise<FacilityPredictions | null> {
+export async function facilityPredictions(facilityId: string, now: Date): Promise<FacilityPredictions | null> {
   const facility = await prisma.parkingFacility.findUnique({
     where: { id: facilityId },
     select: { availabilityMode: true, zones: { select: { id: true, name: true } } },
   });
   if (!facility) return null;
   if (facility.availabilityMode === 'NONE' || facility.zones.length === 0) return unavailable('INSUFFICIENT_DATA');
-  // Research model only: never apply it to real (non-simulation) facilities.
-  if (facility.availabilityMode !== 'SIMULATION') return unavailable('NO_MODEL');
+  // The models are trained on the Melbourne sensors: never apply them to any other source.
+  if (facility.availabilityMode !== 'REPLAY') return unavailable('NO_MODEL');
 
   const settings = await getSettings();
   const latest = await prisma.occupancySnapshot.findFirst({
@@ -257,7 +262,7 @@ export async function facilityPredictions(facilityId: string, now: Date = new Da
 }
 
 /** Fills actualOccupancy/absError for predictions whose target time has an observation (±half a step). */
-export async function evaluateDuePredictions(now: Date = new Date()): Promise<number> {
+export async function evaluateDuePredictions(now: Date): Promise<number> {
   return prisma.$executeRaw`
     WITH due AS (
       SELECT p.id,
@@ -275,4 +280,125 @@ export async function evaluateDuePredictions(now: Date = new Date()): Promise<nu
            "evaluatedAt" = ${now}
       FROM due
      WHERE due.id = p.id AND due.actual IS NOT NULL`;
+}
+
+// ---------------------------------------------------------------------------
+// Predicted vs actual (historical replay)
+// ---------------------------------------------------------------------------
+export interface PvaPoint {
+  /** Base time: the latest observation the prediction uses. */
+  predictionTime: string;
+  targetTime: string;
+  /** Recorded occupancy at the target time; null when no reading was recorded. */
+  actual: number | null;
+  /** Persistence baseline: the occupancy at prediction time carried forward. */
+  persistence: number | null;
+  /** Predicted occupancy per model id; null when the model could not predict (insufficient history). */
+  predicted: Record<string, number | null>;
+}
+
+const CONCURRENCY = 4;
+
+async function pool<T>(items: T[], fn: (x: T) => Promise<void>) {
+  const queue = [...items];
+  await Promise.all(Array.from({ length: CONCURRENCY }, async () => {
+    for (let x = queue.shift(); x !== undefined; x = queue.shift()) await fn(x);
+  }));
+}
+
+/**
+ * Predictions of every registered model for each 5-minute base time in [from, to], next to the recorded outcome.
+ * Predictions are served by the ML service from the recorded history (and cached in Prediction); actuals are the
+ * recorded values. Nothing is interpolated: a missing reading stays null.
+ */
+export async function predictedVsActual(zoneId: string, from: Date, to: Date, registry: Registry) {
+  const models = registry.models;
+  const horizons = [...new Set(models.flatMap((m) => m.horizons_minutes))].sort((a, b) => a - b);
+  const maxH = Math.max(...horizons);
+  const start = floorToStep(from);
+  const stop = floorToStep(to);
+  const n = Math.round((stop.getTime() - start.getTime()) / STEP_MS) + 1;
+  const extra = maxH / STEP_MIN;
+  const radius = Math.max(...models.map((m) => m.config.neighbour_radius_m));
+  const nbs = await neighbourZones(zoneId, radius);
+  const end = new Date(stop.getTime() + maxH * 60_000);
+  const histories = await gridHistories([zoneId, ...nbs.map((x) => x.id)], end, HISTORY_STEPS + n - 1 + extra);
+  const own = histories.get(zoneId)!;
+  const bays = await prisma.occupancySnapshot.findMany({
+    where: { zoneId, observedAt: { gte: start, lte: stop } },
+    select: { observedAt: true, capacity: true },
+  });
+  const baysAt = new Map(bays.map((b) => [b.observedAt.getTime(), b.capacity]));
+
+  // Index in the history arrays of base time i: the arrays end at `end` = stop + maxH.
+  const idx = (i: number) => HISTORY_STEPS - 1 + i;
+  const points: PvaPoint[][] = horizons.map(() => []);
+  const predicted = new Map<string, number>(); // `${model}|${i}|${h}` -> value
+
+  const stored = await prisma.prediction.findMany({
+    where: { zoneId, modelVersionId: { in: models.map((m) => m.id) }, predictionTime: { gte: start, lte: stop } },
+    select: { modelVersionId: true, predictionTime: true, horizonMinutes: true, predictedOccupancy: true },
+  });
+  for (const p of stored) {
+    const i = Math.round((p.predictionTime.getTime() - start.getTime()) / STEP_MS);
+    predicted.set(`${p.modelVersionId}|${i}|${p.horizonMinutes}`, p.predictedOccupancy);
+  }
+
+  const jobs: { meta: ModelMeta; i: number }[] = [];
+  for (const meta of models) {
+    for (let i = 0; i < n; i++) {
+      if (own[idx(i)] == null) continue;
+      if (meta.horizons_minutes.every((h) => predicted.has(`${meta.id}|${i}|${h}`))) continue;
+      jobs.push({ meta, i });
+    }
+  }
+  const created: { zoneId: string; modelVersionId: string; predictionTime: Date; horizonMinutes: number; targetTime: Date; predictedOccupancy: number }[] = [];
+  await pool(jobs, async ({ meta, i }) => {
+    const base = new Date(start.getTime() + i * STEP_MS);
+    const cap = baysAt.get(base.getTime());
+    if (!cap) return;
+    const lo = idx(i) - HISTORY_STEPS + 1;
+    const useNb = meta.feature_set === 'spatial_temporal';
+    try {
+      const r = await predict({
+        zoneId,
+        timestamp: wallClock(base),
+        history: own.slice(lo, idx(i) + 1),
+        observedBays: cap,
+        neighbours: useNb
+          ? nbs.filter((x) => x.distance <= meta.config.neighbour_radius_m).map((x) => ({ distanceM: x.distance, history: histories.get(x.id)!.slice(lo, idx(i) + 1) }))
+          : [],
+        model: meta.id,
+      });
+      for (const p of r.predictions) {
+        predicted.set(`${meta.id}|${i}|${p.horizonMinutes}`, p.predictedOccupancy);
+        created.push({ zoneId, modelVersionId: meta.id, predictionTime: base, horizonMinutes: p.horizonMinutes, targetTime: new Date(base.getTime() + p.horizonMinutes * 60_000), predictedOccupancy: p.predictedOccupancy });
+      }
+    } catch (err) {
+      if (!(err instanceof MlRefusedError)) throw err;
+    }
+  });
+  if (created.length) {
+    for (const meta of models) await ensureModelVersion(meta, meta.id === registry.active);
+    await prisma.prediction.createMany({ data: created, skipDuplicates: true });
+  }
+
+  horizons.forEach((h, hi) => {
+    for (let i = 0; i < n; i++) {
+      const base = start.getTime() + i * STEP_MS;
+      points[hi].push({
+        predictionTime: new Date(base).toISOString(),
+        targetTime: new Date(base + h * 60_000).toISOString(),
+        actual: own[idx(i) + h / STEP_MIN] ?? null,
+        persistence: own[idx(i)] ?? null,
+        predicted: Object.fromEntries(models.map((m) => [m.id, predicted.get(`${m.id}|${i}|${h}`) ?? null])),
+      });
+    }
+  });
+  return {
+    zoneId,
+    neighboursUsed: nbs.length,
+    models: models.map((m) => ({ id: m.id, featureSet: m.feature_set, active: m.id === registry.active })),
+    horizons: horizons.map((h, hi) => ({ horizonMinutes: h, points: points[hi] })),
+  };
 }

@@ -11,7 +11,8 @@ import { authenticate, requireCsrfHeader } from './middleware/auth.js';
 import { authRouter } from './routes/auth.js';
 import { adminRouter } from './routes/admin.js';
 import { getSettings } from './services/settings.js';
-import { areasRouter, parkingRouter } from './routes/parking.js';
+import { parkingRouter } from './routes/parking.js';
+import { replayRouter } from './routes/replay.js';
 import { searchRouter } from './routes/search.js';
 import { statsRouter } from './routes/stats.js';
 import { spilloverRouter } from './routes/spillover.js';
@@ -54,7 +55,7 @@ export function createApp() {
   });
   api.use('/auth', authRouter);
   api.use('/parking', parkingRouter);
-  api.use('/areas', areasRouter);
+  api.use('/replay', replayRouter);
   api.use('/search', searchRouter);
   api.use('/stats', statsRouter);
   api.use('/spillover', spilloverRouter);

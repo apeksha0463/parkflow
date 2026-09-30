@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/db.js';
-import { HttpError, notFound } from '../lib/errors.js';
+import { notFound } from '../lib/errors.js';
 import { Prisma, type ParkingType } from '../generated/prisma/client.js';
 import { ParkingType as ParkingTypeEnum, VehicleType as VehicleTypeEnum } from '../generated/prisma/enums.js';
 import { getSettings } from '../services/settings.js';
-import { facilityPredictions } from '../services/predictions.js';
-import { availabilityFor, displayName, isOpenNow, TYPE_LABEL, UNAVAILABLE_SUMMARY, type AvailabilitySummary } from '../services/facilities.js';
+import { facilityPredictions, pressureLevel } from '../services/predictions.js';
+import { replayNow } from '../services/replay.js';
+import { availabilityFor, displayName, isCurrent, isOpenNow, TYPE_LABEL, UNAVAILABLE_SUMMARY, type AvailabilitySummary } from '../services/facilities.js';
 
 const MAX_CANDIDATES = 5000;
 
@@ -29,7 +30,6 @@ export const ListQuery = z
     lng: z.coerce.number().min(-180).max(180).optional(),
     radius: z.coerce.number().int().min(100).max(10_000).default(2000),
     bbox: bboxSchema.optional(),
-    areaId: z.string().max(40).optional(),
     q: z.string().trim().min(1).max(100).optional(),
     types: csvEnum(ParkingTypeEnum).optional(),
     vehicleType: z.enum(VehicleTypeEnum).optional(),
@@ -50,7 +50,7 @@ interface CandidateRow {
   name: string | null;
   capacity: number | null;
   operatingHours: string | null;
-  availabilityMode: 'NONE' | 'LIVE' | 'SIMULATION';
+  availabilityMode: 'NONE' | 'LIVE' | 'REPLAY';
   distance: number | null;
 }
 
@@ -63,7 +63,7 @@ function whereClauses(q: ListQuery, origin: { lat: number; lng: number } | null)
     const [w, s, e, n] = q.bbox;
     parts.push(Prisma.sql`f.location && ST_MakeEnvelope(${w}, ${s}, ${e}, ${n}, 4326)::geography`);
   }
-  if (q.q) parts.push(Prisma.sql`(lower(f.name) LIKE ${'%' + q.q.toLowerCase() + '%'} OR lower(f.area) LIKE ${'%' + q.q.toLowerCase() + '%'})`);
+  if (q.q) parts.push(Prisma.sql`(lower(f.name) LIKE ${'%' + q.q.toLowerCase() + '%'} OR lower(f.area) LIKE ${'%' + q.q.toLowerCase() + '%'} OR lower(f.address) LIKE ${'%' + q.q.toLowerCase() + '%'})`);
   if (q.types) parts.push(Prisma.sql`f.type::text = ANY(${q.types})`);
   if (q.vehicleType) parts.push(Prisma.sql`${q.vehicleType}::"VehicleType" = ANY(f."vehicleTypes")`);
   if (q.ev) parts.push(Prisma.sql`f."evCharging" = TRUE`);
@@ -72,33 +72,30 @@ function whereClauses(q: ListQuery, origin: { lat: number; lng: number } | null)
   return Prisma.join(parts, ' AND ');
 }
 
-async function resolveOrigin(q: ListQuery): Promise<{ lat: number; lng: number } | null> {
-  if (q.lat != null && q.lng != null) return { lat: q.lat, lng: q.lng };
-  if (q.areaId) {
-    const loc = await prisma.locality.findUnique({ where: { id: q.areaId }, select: { latitude: true, longitude: true } });
-    if (!loc) throw notFound('Area');
-    return { lat: loc.latitude, lng: loc.longitude };
-  }
-  return null;
+function resolveOrigin(q: ListQuery): { lat: number; lng: number } | null {
+  return q.lat != null && q.lng != null ? { lat: q.lat, lng: q.lng } : null;
 }
 
 const facilityInclude = {
   dataSource: { select: { name: true, sourceType: true, url: true, license: true } },
-  locality: { select: { id: true, name: true } },
 } satisfies Prisma.ParkingFacilityInclude;
 
 type FacilityWithSource = Prisma.ParkingFacilityGetPayload<{ include: typeof facilityInclude }>;
 
-export function toFacilityDto(f: FacilityWithSource, extra: { distanceMeters?: number | null; availability: AvailabilitySummary }) {
+export function toFacilityDto(
+  f: FacilityWithSource,
+  extra: { distanceMeters?: number | null; availability: AvailabilitySummary; thresholds: { saturationThreshold: number; approachingThreshold: number } },
+) {
+  const a = extra.availability;
   return {
     id: f.id,
     name: f.name,
+    externalId: f.externalId,
     ...displayName(f.name, f.type, f.area),
     type: f.type,
     typeLabel: TYPE_LABEL[f.type],
     address: f.address,
     area: f.area,
-    locality: f.locality,
     latitude: f.latitude,
     longitude: f.longitude,
     distanceMeters: extra.distanceMeters != null ? Math.round(extra.distanceMeters) : null,
@@ -109,6 +106,7 @@ export function toFacilityDto(f: FacilityWithSource, extra: { distanceMeters?: n
     isFree: f.isFree,
     operatingHours: f.operatingHours,
     openNow: isOpenNow(f.operatingHours),
+    pressureLevel: isCurrent(a.state) ? pressureLevel(a.occupancy, extra.thresholds) : null,
     availabilityMode: f.availabilityMode,
     isDemo: f.isDemo,
     bookingEnabled: f.bookingEnabled,
@@ -118,8 +116,8 @@ export function toFacilityDto(f: FacilityWithSource, extra: { distanceMeters?: n
 }
 
 export async function listFacilities(q: ListQuery) {
-  const origin = await resolveOrigin(q);
-  const settings = await getSettings();
+  const origin = resolveOrigin(q);
+  const [settings, now] = await Promise.all([getSettings(), replayNow()]);
   const distanceSql = origin
     ? Prisma.sql`ST_Distance(f.location, ST_SetSRID(ST_MakePoint(${origin.lng}, ${origin.lat}), 4326)::geography)`
     : Prisma.sql`NULL::float8`;
@@ -134,7 +132,7 @@ export async function listFacilities(q: ListQuery) {
 
   // Availability is only computed for facilities that can have it, keeping the query small.
   const withSource = candidates.filter((c) => c.availabilityMode !== 'NONE');
-  const availability = await availabilityFor(withSource, settings.staleAfterMinutes);
+  const availability = await availabilityFor(withSource, settings.staleAfterMinutes, now);
   const avail = (id: string) => availability.get(id);
 
   const sort = q.sort ?? (origin ? 'distance' : 'name');
@@ -147,7 +145,7 @@ export async function listFacilities(q: ListQuery) {
     availability: (a, b) => {
       const score = (id: string) => {
         const s = avail(id);
-        return s && (s.state === 'LIVE' || s.state === 'SIMULATED') ? (s.available ?? 0) : -1;
+        return s && isCurrent(s.state) ? (s.available ?? 0) : -1;
       };
       return score(b.id) - score(a.id) || (a.distance ?? Infinity) - (b.distance ?? Infinity);
     },
@@ -164,6 +162,7 @@ export async function listFacilities(q: ListQuery) {
       toFacilityDto(byId.get(c.id)!, {
         distanceMeters: c.distance,
         availability: avail(c.id) ?? UNAVAILABLE_SUMMARY,
+        thresholds: settings,
       }),
     ),
     page: q.page,
@@ -172,6 +171,7 @@ export async function listFacilities(q: ListQuery) {
     origin,
     radiusMeters: origin ? q.radius : null,
     sort,
+    at: now.toISOString(),
   };
 }
 
@@ -196,25 +196,33 @@ const MapQuery = z.object({
 parkingRouter.get('/map', async (req, res) => {
   const mq = MapQuery.parse(req.query);
   const q: ListQuery = { ...ListQuery.parse({}), ...mq };
-  let rows = await prisma.$queryRaw<{ id: string; latitude: number; longitude: number; type: ParkingType; availabilityMode: 'NONE' | 'LIVE' | 'SIMULATION'; isDemo: boolean; operatingHours: string | null }[]>`
-    SELECT f.id, f.latitude, f.longitude, f.type, f."availabilityMode", f."isDemo", f."operatingHours"
+  let rows = await prisma.$queryRaw<
+    { id: string; name: string | null; area: string | null; latitude: number; longitude: number; type: ParkingType; availabilityMode: 'NONE' | 'LIVE' | 'REPLAY'; isDemo: boolean; operatingHours: string | null }[]
+  >`
+    SELECT f.id, f.name, f.area, f.latitude, f.longitude, f.type, f."availabilityMode", f."isDemo", f."operatingHours"
       FROM "ParkingFacility" f
      WHERE ${whereClauses(q, null)}
      LIMIT ${MAX_CANDIDATES}`;
   if (q.openNow) rows = rows.filter((r) => isOpenNow(r.operatingHours) === true);
-  const settings = await getSettings();
-  const availability = await availabilityFor(rows.filter((r) => r.availabilityMode !== 'NONE'), settings.staleAfterMinutes);
+  const [settings, now] = await Promise.all([getSettings(), replayNow()]);
+  const availability = await availabilityFor(rows.filter((r) => r.availabilityMode !== 'NONE'), settings.staleAfterMinutes, now);
   res.json({
+    at: now.toISOString(),
     items: rows.map((r) => {
       const a = availability.get(r.id);
+      const current = a != null && isCurrent(a.state);
       return {
         id: r.id,
+        displayName: displayName(r.name, r.type, r.area).displayName,
         latitude: r.latitude,
         longitude: r.longitude,
         type: r.type,
         isDemo: r.isDemo,
         availabilityState: a?.state ?? 'UNAVAILABLE',
-        occupancy: a && (a.state === 'LIVE' || a.state === 'SIMULATED') ? a.occupancy : null,
+        occupancy: current ? a.occupancy : null,
+        available: current ? a.available : null,
+        capacity: current ? a.capacity : null,
+        pressureLevel: current ? pressureLevel(a.occupancy, settings) : null,
       };
     }),
     truncated: rows.length >= MAX_CANDIDATES,
@@ -227,49 +235,46 @@ parkingRouter.get('/:id', async (req, res) => {
     include: { ...facilityInclude, zones: { orderBy: [{ levelNumber: 'asc' }, { name: 'asc' }] } },
   });
   if (!f) throw notFound('Parking facility');
-  const settings = await getSettings();
-  const availability = (await availabilityFor([f], settings.staleAfterMinutes)).get(f.id)!;
+  const [settings, now] = await Promise.all([getSettings(), replayNow()]);
+  const availability = (await availabilityFor([f], settings.staleAfterMinutes, now)).get(f.id)!;
   res.json({
+    at: now.toISOString(),
     facility: {
-      ...toFacilityDto(f, { availability }),
-      zones: f.zones.map((z) => ({ id: z.id, name: z.name, kind: z.kind, levelNumber: z.levelNumber, capacity: z.capacity, saturationState: z.saturationState })),
+      ...toFacilityDto(f, { availability, thresholds: settings }),
+      zones: f.zones.map((z) => ({ id: z.id, name: z.name, kind: z.kind, levelNumber: z.levelNumber, capacity: z.capacity, blockKey: z.replaySourceZone })),
     },
   });
 });
 
-const NeighbourQuery = z.object({
-  radius: z.coerce.number().int().min(100).max(5000).optional(),
-  limit: z.coerce.number().int().min(1).max(50).default(10),
-});
+const NeighbourQuery = z.object({ limit: z.coerce.number().int().min(1).max(50).default(20) });
 
-/** Neighbours are determined by straight-line geographic distance (PostGIS), within a configurable radius. */
+/** Research neighbours: zones within the model's neighbour radius, from the research pipeline's neighbour pairs. */
 parkingRouter.get('/:id/neighbours', async (req, res) => {
   const q = NeighbourQuery.parse(req.query);
-  const settings = await getSettings();
-  const radius = q.radius ?? settings.neighbourRadiusMeters;
-  const exists = await prisma.parkingFacility.findUnique({ where: { id: req.params.id }, select: { id: true } });
-  if (!exists) throw notFound('Parking facility');
-
-  const rows = await prisma.$queryRaw<{ id: string; distance: number }[]>`
-    SELECT n.id, ST_Distance(n.location, f.location) AS distance
-      FROM "ParkingFacility" f
-      JOIN "ParkingFacility" n ON n.id <> f.id AND ST_DWithin(n.location, f.location, ${radius})
-     WHERE f.id = ${req.params.id}
-     ORDER BY distance
-     LIMIT ${q.limit}`;
-  const facilities = await prisma.parkingFacility.findMany({ where: { id: { in: rows.map((r) => r.id) } }, include: facilityInclude });
-  const byId = new Map(facilities.map((f) => [f.id, f]));
-  const availability = await availabilityFor(facilities, settings.staleAfterMinutes);
+  const f = await prisma.parkingFacility.findUnique({ where: { id: req.params.id }, select: { id: true, zones: { select: { id: true } } } });
+  if (!f) throw notFound('Parking facility');
+  const [settings, now] = await Promise.all([getSettings(), replayNow()]);
+  const pairs = await prisma.zoneNeighbour.findMany({
+    where: { zoneId: { in: f.zones.map((z) => z.id) } },
+    orderBy: { distanceM: 'asc' },
+    select: { distanceM: true, neighbour: { select: { facilityId: true } } },
+  });
+  const distance = new Map<string, number>();
+  for (const p of pairs) if (!distance.has(p.neighbour.facilityId) && p.neighbour.facilityId !== f.id) distance.set(p.neighbour.facilityId, p.distanceM);
+  const ids = [...distance.keys()].slice(0, q.limit);
+  const facilities = await prisma.parkingFacility.findMany({ where: { id: { in: ids } }, include: facilityInclude });
+  const byId = new Map(facilities.map((x) => [x.id, x]));
+  const availability = await availabilityFor(facilities, settings.staleAfterMinutes, now);
   res.json({
-    radiusMeters: radius,
-    method: 'Straight-line geographic distance (PostGIS ST_DWithin on WGS84 geography)',
-    items: rows.map((r) => toFacilityDto(byId.get(r.id)!, { distanceMeters: r.distance, availability: availability.get(r.id)! })),
+    at: now.toISOString(),
+    method: 'Research neighbour pairs: block centroids within the neighbour radius used to train the spatial-temporal model',
+    items: ids.map((id) => toFacilityDto(byId.get(id)!, { distanceMeters: distance.get(id), availability: availability.get(id)!, thresholds: settings })),
   });
 });
 
 /** Short-term occupancy predictions. Always returns a status; predictions only when real inputs exist. */
 parkingRouter.get('/:id/predictions', async (req, res) => {
-  const result = await facilityPredictions(req.params.id);
+  const result = await facilityPredictions(req.params.id, await replayNow());
   if (!result) throw notFound('Parking facility');
   res.json(result);
 });
@@ -281,33 +286,18 @@ parkingRouter.get('/:id/occupancy', async (req, res) => {
   const { hours } = OccupancyQuery.parse(req.query);
   const f = await prisma.parkingFacility.findUnique({ where: { id: req.params.id }, select: { id: true, availabilityMode: true, zones: { select: { id: true, name: true } } } });
   if (!f) throw notFound('Parking facility');
-  const since = new Date(Date.now() - hours * 3_600_000);
+  const now = await replayNow();
+  const since = new Date(now.getTime() - hours * 3_600_000);
   const snaps = await prisma.occupancySnapshot.findMany({
-    where: { zoneId: { in: f.zones.map((z) => z.id) }, observedAt: { gte: since, lte: new Date() } },
+    where: { zoneId: { in: f.zones.map((z) => z.id) }, observedAt: { gte: since, lte: now } },
     select: { zoneId: true, observedAt: true, occupied: true, available: true, capacity: true, occupancy: true, sourceType: true },
     orderBy: { observedAt: 'asc' },
     take: 5000,
   });
   res.json({
     availabilityMode: f.availabilityMode,
+    at: now.toISOString(),
     hours,
     zones: f.zones.map((z) => ({ ...z, points: snaps.filter((s) => s.zoneId === z.id).map(({ zoneId: _z, ...p }) => p) })),
   });
-});
-
-export const areasRouter = Router();
-
-areasRouter.get('/:id', async (req, res) => {
-  const area = await prisma.locality.findUnique({
-    where: { id: req.params.id },
-    select: { id: true, name: true, placeType: true, latitude: true, longitude: true },
-  });
-  if (!area) throw notFound('Area');
-  res.json({ area });
-});
-
-areasRouter.get('/:id/parking', async (req, res) => {
-  const q = ListQuery.parse({ radius: '1500', ...req.query, areaId: req.params.id });
-  if (q.lat != null || q.bbox) throw new HttpError(400, 'VALIDATION_ERROR', 'Use either an area or coordinates, not both');
-  res.json(await listFacilities(q));
 });

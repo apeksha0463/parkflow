@@ -48,13 +48,13 @@ enum SourceType {
   UNKNOWN
 }
 
-/// How (if at all) current availability is obtained for a facility.
-/// NONE: UI shows "Availability currently unavailable". LIVE: real provider feed.
-/// SIMULATION: historical-replay demo, always labelled as simulation.
+/// How (if at all) current occupancy is obtained for a facility.
+/// NONE: no occupancy source. LIVE: real provider feed.
+/// REPLAY: recorded sensor history replayed on the server's replay clock, always labelled "Historical replay".
 enum AvailabilityMode {
   NONE
   LIVE
-  SIMULATION
+  REPLAY
 }
 
 enum VehicleType {
@@ -127,8 +127,6 @@ model ParkingFacility {
   type             ParkingType                            @default(UNKNOWN)
   address          String?
   area             String?
-  localityId       String?
-  locality         Locality?                              @relation(fields: [localityId], references: [id], onDelete: SetNull)
   latitude         Float
   longitude        Float
   location         Unsupported("geography(Point, 4326)")?
@@ -155,7 +153,6 @@ model ParkingFacility {
   savedBy          SavedParking[]
 
   @@index([area])
-  @@index([localityId])
   @@index([type])
   @@index([location], type: Gist)
 }
@@ -175,7 +172,7 @@ model ParkingZone {
   longitude        Float
   location         Unsupported("geography(Point, 4326)")?
   saturationState  SaturationState                        @default(NORMAL)
-  /// Research-dataset zone whose history is replayed onto this demo zone (simulation only).
+  /// Research-dataset block key whose recorded history is replayed on this zone (e.g. "123:647-1221").
   replaySourceZone String?
   createdAt        DateTime                               @default(now())
   updatedAt        DateTime                               @updatedAt
@@ -183,9 +180,23 @@ model ParkingZone {
   saturationEvents SaturationEvent[]
   predictions      Prediction[]
   bookings         Booking[]
+  neighbours       ZoneNeighbour[]                        @relation("ZoneNeighbours")
+  neighbourOf      ZoneNeighbour[]                        @relation("NeighbourOf")
 
   @@index([facilityId])
   @@index([location], type: Gist)
+}
+
+/// Research neighbour relation (zones within the model's neighbour radius), loaded from the research
+/// pipeline's neighbours.csv so the product uses exactly the pairs the spatial-temporal model was trained on.
+model ZoneNeighbour {
+  zoneId      String
+  zone        ParkingZone @relation("ZoneNeighbours", fields: [zoneId], references: [id], onDelete: Cascade)
+  neighbourId String
+  neighbour   ParkingZone @relation("NeighbourOf", fields: [neighbourId], references: [id], onDelete: Cascade)
+  distanceM   Float
+
+  @@id([zoneId, neighbourId])
 }
 
 model OccupancySnapshot {
@@ -327,20 +338,3 @@ model SystemConfig {
   updatedAt   DateTime @updatedAt
 }
 
-/// Named Bengaluru place (suburb / neighbourhood / quarter) from OpenStreetMap.
-/// Used for offline area search and for labelling facilities with their nearest locality.
-model Locality {
-  id         String                                 @id @default(cuid())
-  externalId String                                 @unique
-  name       String
-  placeType  String
-  latitude   Float
-  longitude  Float
-  location   Unsupported("geography(Point, 4326)")?
-  createdAt  DateTime                               @default(now())
-  updatedAt  DateTime                               @updatedAt
-  facilities ParkingFacility[]
-
-  @@index([name])
-  @@index([location], type: Gist)
-}

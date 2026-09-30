@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import { config } from '../config.js';
 import { requireAuth } from '../middleware/auth.js';
-import { GeocoderUnavailableError, mergeResults, searchLocalities, searchNominatim } from '../services/geocode.js';
+import { GeocoderUnavailableError, mergeResults, searchNominatim, searchZones } from '../services/geocode.js';
 
 export const searchRouter = Router();
 
@@ -24,19 +24,20 @@ const fullSearchLimiter = rateLimit({
 
 searchRouter.get('/geocode', (req, res, next) => (req.query.mode === 'full' ? fullSearchLimiter(req, res, next) : next()), async (req, res) => {
   const { q, mode } = SearchQuery.parse(req.query);
-  const localities = await searchLocalities(q);
+  const zones = await searchZones(q);
   if (mode === 'suggest') {
-    res.json({ results: localities, geocoder: 'not_used' });
+    res.json({ results: zones, geocoder: 'not_used' });
     return;
   }
   try {
     const places = await searchNominatim(q);
-    res.json({ results: mergeResults(localities, places), geocoder: 'ok' });
+    // Places first on an explicit search: the user asked for a location, zones follow as shortcuts.
+    res.json({ results: mergeResults(places, zones), geocoder: 'ok' });
   } catch (err) {
     if (!(err instanceof GeocoderUnavailableError)) throw err;
     req.log?.warn({ err: err.message }, 'Geocoder unavailable');
-    // Degrade gracefully to our own locality index.
-    res.json({ results: localities, geocoder: 'unavailable' });
+    // Degrade gracefully to our own zone index.
+    res.json({ results: zones, geocoder: 'unavailable' });
   }
 });
 

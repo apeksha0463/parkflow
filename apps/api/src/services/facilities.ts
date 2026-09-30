@@ -33,7 +33,7 @@ export function displayName(name: string | null, type: ParkingType, area: string
   return { displayName: area ? `${base} near ${area}` : base, nameIsDerived: true };
 }
 
-/** true/false when the hours string parses; null when unknown or unparseable. Evaluated in Asia/Kolkata (process TZ). */
+/** true/false when the hours string parses; null when unknown or unparseable. */
 export function isOpenNow(hours: string | null, at: Date = new Date()): boolean | null {
   if (!hours) return null;
   try {
@@ -43,7 +43,10 @@ export function isOpenNow(hours: string | null, at: Date = new Date()): boolean 
   }
 }
 
-export type AvailabilityState = 'LIVE' | 'SIMULATED' | 'STALE' | 'HISTORICAL_ONLY' | 'UNAVAILABLE';
+export type AvailabilityState = 'LIVE' | 'REPLAY' | 'STALE' | 'HISTORICAL_ONLY' | 'UNAVAILABLE';
+
+/** States whose occupancy is current (at the replay clock, or live). */
+export const isCurrent = (s: AvailabilityState) => s === 'LIVE' || s === 'REPLAY';
 
 export interface AvailabilitySummary {
   state: AvailabilityState;
@@ -70,7 +73,7 @@ interface LatestRow {
 
 export const UNAVAILABLE_SUMMARY: AvailabilitySummary = {
   state: 'UNAVAILABLE',
-  message: 'Availability currently unavailable.',
+  message: 'No reading at this time.',
   occupied: null,
   available: null,
   capacity: null,
@@ -80,21 +83,26 @@ export const UNAVAILABLE_SUMMARY: AvailabilitySummary = {
   sourceType: null,
 };
 
-/** Latest snapshot per zone, aggregated per facility. */
+/** Latest snapshot at or before `now` (the replay clock) per zone, aggregated per facility. */
 export async function availabilityFor(
   facilities: { id: string; availabilityMode: AvailabilityMode }[],
   staleAfterMinutes: number,
-  now: Date = new Date(),
+  now: Date,
 ): Promise<Map<string, AvailabilitySummary>> {
   const out = new Map<string, AvailabilitySummary>();
   if (!facilities.length) return out;
   const ids = facilities.map((f) => f.id);
+  // One index lookup per zone (unique (zoneId, observedAt)) — the history table holds millions of rows.
   const rows = await prisma.$queryRaw<LatestRow[]>`
-    SELECT DISTINCT ON (s."zoneId") z."facilityId", s."zoneId", s."observedAt", s.occupied, s.available, s.capacity, s.occupancy, s."sourceType"
-      FROM "OccupancySnapshot" s
-      JOIN "ParkingZone" z ON z.id = s."zoneId"
-     WHERE z."facilityId" = ANY(${ids}) AND s."observedAt" <= ${now}
-     ORDER BY s."zoneId", s."observedAt" DESC`;
+    SELECT z."facilityId", z.id AS "zoneId", s."observedAt", s.occupied, s.available, s.capacity, s.occupancy, s."sourceType"
+      FROM "ParkingZone" z
+      CROSS JOIN LATERAL (
+        SELECT sn."observedAt", sn.occupied, sn.available, sn.capacity, sn.occupancy, sn."sourceType"
+          FROM "OccupancySnapshot" sn
+         WHERE sn."zoneId" = z.id AND sn."observedAt" <= ${now} AND sn."observedAt" > ${new Date(now.getTime() - 7 * 24 * 3_600_000)}
+         ORDER BY sn."observedAt" DESC
+         LIMIT 1) s
+     WHERE z."facilityId" = ANY(${ids})`;
 
   const byFacility = new Map<string, LatestRow[]>();
   for (const r of rows) byFacility.set(r.facilityId, [...(byFacility.get(r.facilityId) ?? []), r]);
@@ -124,9 +132,9 @@ export async function availabilityFor(
     if (f.availabilityMode === 'NONE') {
       out.set(f.id, { ...base, state: 'HISTORICAL_ONLY', message: 'Historical data available — live availability unavailable.' });
     } else if (ageMinutes > staleAfterMinutes) {
-      out.set(f.id, { ...base, state: 'STALE', message: `Last reported ${ageMinutes} minutes ago — may be out of date.` });
-    } else if (f.availabilityMode === 'SIMULATION') {
-      out.set(f.id, { ...base, state: 'SIMULATED', message: 'Simulation Mode — historical parking data replay.' });
+      out.set(f.id, { ...base, state: 'STALE', message: `No sensor reading for ${ageMinutes} min before this time.` });
+    } else if (f.availabilityMode === 'REPLAY') {
+      out.set(f.id, { ...base, state: 'REPLAY', message: 'Historical replay — recorded sensor data.' });
     } else {
       out.set(f.id, { ...base, state: 'LIVE', message: `Updated ${ageMinutes} min ago.` });
     }

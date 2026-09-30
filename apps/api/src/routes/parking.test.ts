@@ -3,17 +3,15 @@ import request from 'supertest';
 import { createApp } from '../app.js';
 import { prisma } from '../lib/db.js';
 import { CSRF, createUser, loginAs, resetDb } from '../test/helpers.js';
-import { clearGeocodeCache, distanceMeters, mergeResults } from '../services/geocode.js';
+import { clearGeocodeCache, mergeResults } from '../services/geocode.js';
+import { clearReplayCache } from '../services/replay.js';
 
 const app = createApp();
-const ORIGIN = { lat: 12.9352, lng: 77.6245 }; // Koramangala (test fixture coordinates)
+const ORIGIN = { lat: -37.8136, lng: 144.9631 }; // test fixture coordinates (Melbourne CBD)
 
 async function fixtures() {
-  const osm = await prisma.dataSource.create({ data: { name: 'OpenStreetMap', sourceType: 'VERIFIED_DIRECTORY' } });
-  const sim = await prisma.dataSource.create({ data: { name: 'ParkFlow Simulation', sourceType: 'SIMULATION' } });
-  const locality = await prisma.locality.create({
-    data: { externalId: 'osm:node/1', name: 'Koramangala', placeType: 'suburb', latitude: ORIGIN.lat, longitude: ORIGIN.lng },
-  });
+  const other = await prisma.dataSource.create({ data: { name: 'Test directory', sourceType: 'VERIFIED_DIRECTORY' } });
+  const sensors = await prisma.dataSource.create({ data: { name: 'Test sensors', sourceType: 'HISTORICAL_DATA' } });
   const mk = (id: string, dLat: number, extra: Record<string, unknown> = {}) =>
     prisma.parkingFacility.create({
       data: {
@@ -21,9 +19,8 @@ async function fixtures() {
         externalId: `test:${id}`,
         latitude: ORIGIN.lat + dLat,
         longitude: ORIGIN.lng,
-        dataSourceId: osm.id,
-        area: 'Koramangala',
-        localityId: locality.id,
+        dataSourceId: other.id,
+        area: 'Test Area',
         zones: { create: { id: `z_${id}`, name: 'Main', latitude: ORIGIN.lat + dLat, longitude: ORIGIN.lng } },
         ...extra,
       },
@@ -32,14 +29,19 @@ async function fixtures() {
   await mk('mid', 0.005, { type: 'MULTI_LEVEL', operatingHours: 'off', vehicleTypes: ['CAR'] });
   await mk('far', 0.03, { name: 'Far Mall', type: 'MALL' });
   await mk('sim', 0.002, {
-    name: 'Demo Sim Lot',
-    type: 'PUBLIC',
-    availabilityMode: 'SIMULATION',
-    isDemo: true,
-    dataSourceId: sim.id,
+    name: 'Test Street between A Street and B Street',
+    type: 'ON_STREET',
+    availabilityMode: 'REPLAY',
+    dataSourceId: sensors.id,
     capacity: 100,
   });
-  return { locality };
+  // research neighbour pairs (directed, as in neighbours.csv)
+  await prisma.zoneNeighbour.createMany({
+    data: [
+      { zoneId: 'z_near', neighbourId: 'z_sim', distanceM: 111 },
+      { zoneId: 'z_near', neighbourId: 'z_mid', distanceM: 445 },
+    ],
+  });
 }
 
 async function snapshot(zoneId: string, minutesAgo: number, occupied: number, capacity = 100) {
@@ -51,13 +53,14 @@ async function snapshot(zoneId: string, minutesAgo: number, occupied: number, ca
       capacity,
       available: capacity - occupied,
       occupancy: occupied / capacity,
-      sourceType: 'SIMULATION',
+      sourceType: 'HISTORICAL_DATA',
     },
   });
 }
 
 beforeEach(async () => {
   await resetDb();
+  clearReplayCache();
   clearGeocodeCache();
   vi.restoreAllMocks();
 });
@@ -72,25 +75,25 @@ describe('GET /api/parking', () => {
     const [near, , mid] = res.body.items;
     expect(near.distanceMeters).toBeGreaterThan(90);
     expect(near.distanceMeters).toBeLessThan(130);
-    expect(mid).toMatchObject({ name: null, nameIsDerived: true, displayName: 'Multi-level parking near Koramangala' });
-    expect(near.source.name).toBe('OpenStreetMap');
+    expect(mid).toMatchObject({ name: null, nameIsDerived: true, displayName: 'Multi-level parking near Test Area' });
+    expect(near.source.name).toBe('Test directory');
   });
 
   it('never invents availability for facilities without a source', async () => {
     await fixtures();
     const res = await request(app).get('/api/parking').query({ ...ORIGIN, radius: 1000 });
     const near = res.body.items.find((f: { id: string }) => f.id === 'near');
-    expect(near.availability).toMatchObject({ state: 'UNAVAILABLE', message: 'Availability currently unavailable.', available: null, occupancy: null });
+    expect(near.availability).toMatchObject({ state: 'UNAVAILABLE', message: 'No reading at this time.', available: null, occupancy: null });
   });
 
-  it('reports simulated availability with freshness, and marks old data stale', async () => {
+  it('reports replayed availability with freshness and pressure, and marks old data stale', async () => {
     await fixtures();
     await snapshot('z_sim', 3, 92);
     let res = await request(app).get('/api/parking').query({ ...ORIGIN, radius: 1000 });
     let sim = res.body.items.find((f: { id: string }) => f.id === 'sim');
-    expect(sim.availability).toMatchObject({ state: 'SIMULATED', occupied: 92, available: 8, capacity: 100, ageMinutes: 3 });
-    expect(sim.availability.message).toMatch(/Simulation Mode/);
-    expect(sim.isDemo).toBe(true);
+    expect(sim.availability).toMatchObject({ state: 'REPLAY', occupied: 92, available: 8, capacity: 100, ageMinutes: 3 });
+    expect(sim.availability.message).toMatch(/Historical replay/);
+    expect(sim.pressureLevel).toBe('SATURATED');
 
     await prisma.occupancySnapshot.deleteMany();
     await snapshot('z_sim', 45, 50);
@@ -127,7 +130,7 @@ describe('GET /api/parking', () => {
   });
 });
 
-describe('map, detail, neighbours, areas', () => {
+describe('map, detail, neighbours', () => {
   it('returns compact markers inside a bbox', async () => {
     await fixtures();
     const bbox = [ORIGIN.lng - 0.01, ORIGIN.lat - 0.01, ORIGIN.lng + 0.01, ORIGIN.lat + 0.01].join(',');
@@ -163,35 +166,23 @@ describe('map, detail, neighbours, areas', () => {
     expect(res.body.facility.availability.state).toBe('HISTORICAL_ONLY');
   });
 
-  it('finds neighbours by geographic distance within the configured radius', async () => {
+  it('returns the research neighbour pairs, nearest first', async () => {
     await fixtures();
     const res = await request(app).get('/api/parking/near/neighbours');
-    expect(res.body.radiusMeters).toBe(800);
-    expect(res.body.items.map((f: { id: string }) => f.id)).toEqual(['sim', 'mid']);
-    const d = distanceMeters(ORIGIN.lat + 0.001, ORIGIN.lng, ORIGIN.lat + 0.002, ORIGIN.lng);
-    expect(Math.abs(res.body.items[0].distanceMeters - d)).toBeLessThan(2);
-
-    const wide = await request(app).get('/api/parking/near/neighbours').query({ radius: 5000 });
-    expect(wide.body.items.map((f: { id: string }) => f.id)).toEqual(['sim', 'mid', 'far']);
-  });
-
-  it('lists parking around an area', async () => {
-    const { locality } = await fixtures();
-    const res = await request(app).get(`/api/areas/${locality.id}/parking`);
     expect(res.status).toBe(200);
-    expect(res.body.radiusMeters).toBe(1500);
-    expect(res.body.items.map((f: { id: string }) => f.id)).toEqual(['near', 'sim', 'mid']);
-    expect((await request(app).get('/api/areas/unknown/parking')).status).toBe(404);
+    expect(res.body.items.map((f: { id: string }) => f.id)).toEqual(['sim', 'mid']);
+    expect(res.body.items[0].distanceMeters).toBe(111);
+    expect((await request(app).get('/api/parking/far/neighbours')).body.items).toEqual([]);
   });
 });
 
 describe('search', () => {
-  it('suggests localities without calling the external geocoder', async () => {
+  it('suggests sensor zones without calling the external geocoder', async () => {
     await fixtures();
     const spy = vi.spyOn(globalThis, 'fetch');
-    const res = await request(app).get('/api/search/geocode').query({ q: 'kora' });
+    const res = await request(app).get('/api/search/geocode').query({ q: 'test street' });
     expect(res.status).toBe(200);
-    expect(res.body.results[0]).toMatchObject({ label: 'Koramangala', kind: 'locality' });
+    expect(res.body.results[0]).toMatchObject({ label: 'Test Street between A Street and B Street', kind: 'zone' });
     expect(res.body.geocoder).toBe('not_used');
     expect(spy).not.toHaveBeenCalled();
   });
@@ -199,25 +190,28 @@ describe('search', () => {
   it('degrades gracefully when the geocoder is unavailable', async () => {
     await fixtures();
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'));
-    const res = await request(app).get('/api/search/geocode').query({ q: 'koramangala', mode: 'full' });
+    const res = await request(app).get('/api/search/geocode').query({ q: 'test street', mode: 'full' });
     expect(res.status).toBe(200);
     expect(res.body.geocoder).toBe('unavailable');
-    expect(res.body.results[0].label).toBe('Koramangala');
+    expect(res.body.results[0].kind).toBe('zone');
   });
 
-  it('merges geocoder results and removes near-duplicates', async () => {
+  it('bounds the geocoder to Melbourne, lists places first and removes near-duplicates', async () => {
     await fixtures();
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify([
-          { place_id: 1, lat: String(ORIGIN.lat + 0.001), lon: String(ORIGIN.lng), name: 'Koramangala', display_name: 'Koramangala, Bengaluru' },
-          { place_id: 2, lat: '12.9757', lon: '77.6061', name: 'MG Road', display_name: 'MG Road, Shivaji Nagar, Bengaluru' },
+          { place_id: 1, lat: String(ORIGIN.lat + 0.002), lon: String(ORIGIN.lng), name: 'Test Street between A Street and B Street', display_name: 'x, Melbourne' },
+          { place_id: 2, lat: '-37.8183', lon: '144.9671', name: 'Some Place', display_name: 'Some Place, Melbourne, Victoria' },
         ]),
       ),
     );
-    const res = await request(app).get('/api/search/geocode').query({ q: 'koramangala', mode: 'full' });
+    const res = await request(app).get('/api/search/geocode').query({ q: 'test street', mode: 'full' });
     expect(res.body.geocoder).toBe('ok');
-    expect(res.body.results.map((r: { label: string }) => r.label)).toEqual(['Koramangala', 'MG Road']);
+    expect(res.body.results.map((r: { kind: string }) => r.kind)).toEqual(['place', 'place']);
+    const url = String(spy.mock.calls[0][0]);
+    expect(url).toContain('countrycodes=au');
+    expect(url).toContain('bounded=1');
     expect(mergeResults([], [])).toEqual([]);
   });
 
@@ -226,12 +220,12 @@ describe('search', () => {
   });
 
   it('stores recent searches only for signed-in users', async () => {
-    const body = { query: 'Koramangala', latitude: ORIGIN.lat, longitude: ORIGIN.lng };
+    const body = { query: 'Test place', latitude: ORIGIN.lat, longitude: ORIGIN.lng };
     expect((await request(app).post('/api/search/recent').set(CSRF).send(body)).status).toBe(401);
     await createUser('USER', 'u@example.com');
     const agent = await loginAs(app, 'u@example.com');
     expect((await agent.post('/api/search/recent').set(CSRF).send(body)).status).toBe(201);
     const list = await agent.get('/api/search/recent');
-    expect(list.body.items[0].query).toBe('Koramangala');
+    expect(list.body.items[0].query).toBe('Test place');
   });
 });

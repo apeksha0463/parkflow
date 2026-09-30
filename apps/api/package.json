@@ -12,8 +12,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "postinstall": "prisma generate",
     "db:migrate:dev": "prisma migrate dev",
-    "import:osm": "tsx scripts/import-osm.ts",
-    "db:seed:simulation": "tsx scripts/seed-simulation.ts"
+    "db:seed:melbourne": "tsx scripts/seed-melbourne.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
