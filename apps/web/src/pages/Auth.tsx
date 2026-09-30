@@ -2,14 +2,14 @@ import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useAuth } from '../auth/AuthContext'
-import { Logo } from '../components/layout/AppHeader'
+import { Logo } from '../components/layout/AppShell'
 import { Button } from '../components/ui/Button'
 import { Field } from '../components/ui/primitives'
 import { ApiError, errorMessage } from '../lib/api'
 
 /** Only allow same-site relative redirects. */
 function safeNext(raw: string | null): string {
-  return raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/explore'
+  return raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/'
 }
 
 function AuthLayout({ title, subtitle, children }: { title: string; subtitle: React.ReactNode; children: React.ReactNode }) {
@@ -25,7 +25,7 @@ function AuthLayout({ title, subtitle, children }: { title: string; subtitle: Re
       </div>
       <div className="hidden flex-col justify-end bg-ink-900 p-12 text-white lg:flex">
         <p className="max-w-md text-2xl leading-snug font-medium">“Where is parking available now — and where is pressure likely to build next?”</p>
-        <p className="mt-4 max-w-md text-sm text-ink-300">ParkFlow maps parking across Bengaluru and shows availability and forecasts with their sources, freshness and uncertainty.</p>
+        <p className="mt-4 max-w-md text-sm text-ink-300">ParkFlow forecasts parking-pressure spillover across neighbouring Melbourne sensor zones, with every value’s source shown.</p>
       </div>
     </div>
   )

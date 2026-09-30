@@ -28,82 +28,73 @@ Base URL: `${VITE_API_URL}` (e.g. `https://api.example.com`). All JSON.
 ## Admin (role `ADMIN`)
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/admin/settings` | `{settings}` — `saturationThreshold` (0.9), `approachingThreshold` (0.8), `neighbourRadiusMeters` (800), `staleAfterMinutes` (30) |
+| GET | `/api/admin/settings` | `{settings}` — `saturationThreshold` (0.9), `approachingThreshold` (0.8), `neighbourRadiusMeters` (200; not used for model neighbours), `staleAfterMinutes` (30) |
 | PATCH | `/api/admin/settings` | Partial update; validated (`approaching < saturation`), audited |
 | GET | `/api/admin/audit-logs` | `?page&pageSize&entityType&action` (action is a prefix match) |
+
+## Replay clock
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/replay` | `{mode: "HISTORICAL_REPLAY" \| "NOT_CONFIGURED", now, playing, speed, stepMinutes, range: {start, end, timezone, dataset}}`. `now` is the recorded instant every current value refers to. |
+| POST | `/api/replay` | `{at?, playing?, speed? (1–600)}`. `at` must lie within `range` (`400`); `409 REPLAY_NOT_CONFIGURED` without a loaded replay. Shared by all viewers. |
+
+## Overview
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/stats` | Counts from the database (`zones`, `zonesWithNeighbours`, `neighbourRelations`, `saturationEvents`), zone `bounds`, replay range, active model (`horizonsMinutes`, `neighbourRadiusMeters`, status — `unavailable` when the ML service is down) and `sources`. |
 
 ## Search
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/api/search/geocode?q=&mode=suggest` | – | Type-ahead from ParkFlow's locality index (OSM place names). Never calls external services. |
-| GET | `/api/search/geocode?q=&mode=full` | – | Localities + Nominatim geocoding bounded to Bengaluru. Call on explicit submit only (Nominatim forbids autocomplete). `geocoder`: `ok` / `unavailable` (falls back to localities). 20/min per IP. |
+| GET | `/api/search/geocode?q=&mode=suggest` | – | Sensor zones whose street description or area matches. Never calls external services. |
+| GET | `/api/search/geocode?q=&mode=full` | – | Nominatim bounded to Greater Melbourne (`countrycodes=au`), ordered by distance to the monitored zones, then matching zones. Call on explicit submit only. `geocoder`: `ok` / `unavailable` (falls back to zones). 20/min per IP. |
 | POST | `/api/search/recent` | user | `{query, latitude, longitude}`; keeps the last 20 |
 | GET | `/api/search/recent` | user | Last 10 searches |
 
-Result item: `{ id, label, sublabel, latitude, longitude, kind: 'locality' | 'place', source }`.
+Result item: `{ id, label, sublabel, latitude, longitude, kind: 'zone' | 'place', source }` (`zone:<facilityId>` ids for zones).
 
-## Parking directory
+## Sensor zones
+All values are at the replay clock (`at` in responses).
+
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/parking` | List/search. Location: `lat&lng&radius` (100–10000 m, default 2000), `bbox=w,s,e,n`, or `areaId`. Filters: `q`, `types=A,B`, `vehicleType`, `ev`, `free`, `openNow`, `hasAvailability`. `sort=distance\|name\|capacity\|availability`. Paginated. |
-| GET | `/api/parking/map?bbox=w,s,e,n&types=` | Compact markers `{id, latitude, longitude, type, isDemo, availabilityState, occupancy}` for client-side clustering |
-| GET | `/api/parking/:id` | Facility detail including zones |
-| GET | `/api/parking/:id/neighbours?radius=&limit=` | Facilities within `radius` metres (default: admin `neighbourRadiusMeters`), nearest first |
-| GET | `/api/parking/:id/occupancy?hours=24` | Recorded occupancy snapshots (1–168 h) per zone, each with `sourceType`. Empty for facilities without an availability source. |
-| GET | `/api/parking/:id/predictions` | Short-term predicted occupancy (see below). Always 200 with a `status`. |
-| GET | `/api/areas/:id` | Locality |
-| GET | `/api/areas/:id/parking` | Same as `/api/parking`, centred on the locality (default radius 1500 m) |
+| GET | `/api/parking` | List/search. Location: `lat&lng&radius` (100–10000 m) or `bbox=w,s,e,n`. Filters: `q`, `hasAvailability`. `sort=distance\|name\|capacity\|availability`. Paginated. |
+| GET | `/api/parking/map?bbox=w,s,e,n` | Compact zones `{id, displayName, latitude, longitude, availabilityState, occupancy, available, capacity, pressureLevel}` |
+| GET | `/api/parking/:id` | Zone detail (`zones[].blockKey` = City of Melbourne block key) |
+| GET | `/api/parking/:id/neighbours?limit=` | Research neighbour pairs (block centroids within the model's 200 m radius), nearest first |
+| GET | `/api/parking/:id/occupancy?hours=24` | Recorded occupancy up to the replay time (1–168 h) |
+| GET | `/api/parking/:id/predictions` | Predicted occupancy per horizon (below). Always 200 with a `status`. |
 
-### Facility object (abridged)
+### Zone object (abridged)
 ```jsonc
 {
-  "id": "…", "name": null, "displayName": "Multi-level parking near Koramangala 6th Block", "nameIsDerived": true,
-  "type": "MULTI_LEVEL", "typeLabel": "Multi-level", "distanceMeters": 502,
-  "capacity": null, "pricingText": null, "isFree": null, "operatingHours": null, "openNow": null, // null = unknown
-  "availabilityMode": "NONE", "isDemo": false,
-  "availability": { "state": "UNAVAILABLE", "message": "Availability currently unavailable.", "available": null, "occupancy": null, "observedAt": null, "ageMinutes": null },
-  "source": { "name": "OpenStreetMap", "sourceType": "VERIFIED_DIRECTORY", "license": "ODbL 1.0 …", "recordUrl": "https://www.openstreetmap.org/way/…", "lastVerifiedAt": "2026-06-01T08:52:28Z" }
+  "id": "…", "name": "<street description from the source>", "externalId": "melbourne:<block key>", "area": "<source area>",
+  "latitude": -37.8, "longitude": 144.9, "capacity": 14,            // capacity = sensors on the block
+  "availabilityMode": "REPLAY", "pressureLevel": "SATURATED",
+  "availability": { "state": "REPLAY", "message": "Historical replay — recorded sensor data.", "occupied": 11, "available": 1, "capacity": 12, "occupancy": 0.917, "observedAt": "…", "ageMinutes": 0 },
+  "source": { "name": "City of Melbourne on-street parking sensors (2019)", "sourceType": "HISTORICAL_DATA", "license": "CC BY 4.0 …" }
 }
 ```
-
-`availability.state`:
-- `LIVE`: real provider feed, fresh.
-- `SIMULATED`: historical replay, fresh.
-- `STALE`: older than `staleAfterMinutes`.
-- `HISTORICAL_ONLY`: no current source; the numbers are historical.
-- `UNAVAILABLE`: no data.
+`availability.state`: `REPLAY` (recorded value at the replay time) · `LIVE` (real feed; none connected) · `STALE` (no reading for more than `staleAfterMinutes` before the replay time) · `HISTORICAL_ONLY` · `UNAVAILABLE` (no reading). `availability.capacity` is the number of bays reporting at that instant.
 
 ## Predictions
-`GET /api/parking/:id/predictions`:
-```jsonc
-{
-  "status": "AVAILABLE",            // or INSUFFICIENT_DATA | NO_MODEL | STALE | SERVICE_UNAVAILABLE (then zones = [] and message is set).
-                                    // Only SIMULATION (research) zones are predicted; a real LIVE facility gets NO_MODEL.
-  "message": null,                  // e.g. "Prediction unavailable — insufficient historical data."
-  "provenance": "PREDICTED",
-  "model": { "id": "spatial_temporal-hgb-v1", "featureSet": "spatial_temporal", "trainingDataset": "melbourne-on-street-sensors-2019", "trainedAt": "…" },
-  "zones": [{
-    "zoneId": "…", "zoneName": "…", "basedOn": "2026-09-29T10:05:00.000Z", "isSimulated": true,
-    "currentOccupancy": 0.72, "currentState": "NORMAL", "neighboursUsed": 4,
-    "predictions": [{ "horizonMinutes": 15, "targetTime": "…", "predictedOccupancy": 0.84, "pressureLevel": "APPROACHING_SATURATION" }]
-  }]
-}
-```
-- **When the ML service is called:** only when the facility has an availability source, a snapshot no older than `staleAfterMinutes`, and a known capacity.
-- **Neighbours:** zones within the model's training radius, taken from the model metadata.
-- **Storage:** predictions are stored and reused for the same base time.
-- **What's never returned:** confidence values (none are computed), and horizons the model doesn't have.
+`GET /api/parking/:id/predictions` → `{status: AVAILABLE | INSUFFICIENT_DATA | NO_MODEL | STALE | SERVICE_UNAVAILABLE, message, provenance: "PREDICTED", model, zones: [{basedOn, currentOccupancy, currentState, neighboursUsed, predictions: [{horizonMinutes, targetTime, predictedOccupancy, pressureLevel}]}]}`.
+- The ML service is called only for REPLAY zones with a recent reading; inputs are 1 week of 5-minute history of the zone and its research neighbours within the model radius, with the Melbourne wall-clock time.
+- Predictions are stored and reused for the same base time. No confidence values are returned (none are computed).
 
-## Spillover
+## Spillover and events
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/spillover/events?active=&facilityId=&simulated=&page=&pageSize=` | Saturation events derived from snapshots with the admin thresholds. `isSimulated` marks replay data. |
-| GET | `/api/spillover/predictions?facilityId=` | Neighbourhood analysis around a facility. `origin` gives its availability, pressure level and active event. `spilloverContext` is true when the origin is at or near saturation. `warnings` are neighbours with predicted occupancy ≥ the approaching threshold and above their current value; the message uses hedged wording. `alternatives` are ranked by predicted (else current) occupancy plus 0.1 per km, and exclude closed, saturated or no-data facilities; each has a `reason`. `neighbours` lists every neighbour with its prediction status. |
+| GET | `/api/spillover/predictions?facilityId=` | At the replay time: `origin` (availability, pressure level, `activeSaturationEvent`, `predictions`), `spilloverContext` (origin at/near saturation), `neighbourRadiusMeters`, `warningHorizonMinutes`, `warnings` (research neighbours with predicted occupancy ≥ the high-pressure threshold and above current; hedged message), `alternatives` (not warned, below saturation now and predicted; ranked by predicted occupancy + 0.1 × km; each with `reason`), `neighbours`. |
+| GET | `/api/spillover/events?facilityId=&from=&to=&withNeighbours=&page=&pageSize=` | Research-defined saturation events of the replayed period, newest first; `activeAtReplayTime` per event. |
+| GET | `/api/spillover/events/adjacent?direction=next\|previous&from=&eventId=&facilityId=&withNeighbours=` | The event right after/before the reference (replay time by default); `{event: null}` at either end. |
+| GET | `/api/spillover/events/:id` | One event |
 
 ## Analytics
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/api/analytics/model-performance` | — | `registry` (model metadata), `offline` (the research evaluation `results.json`, unmodified) and `online` (served predictions' MAE/RMSE once actuals exist, split by `isSimulated`). `mlService: "unavailable"` with nulls when the ML service is down. |
+| GET | `/api/analytics/model-performance` | — | `registry`, `offline` (the research evaluation `results.json`, unmodified), `dataset` (pipeline reports) and `online` (served predictions' MAE/RMSE). `mlService: "unavailable"` with nulls when the ML service is down. |
+| GET | `/api/analytics/predicted-vs-actual?facilityId=&from=&to=` | — | Window ≤ 3 h. Per horizon and 5-minute base time: each registered model's prediction, the recorded `actual` at the target time (null when not recorded) and the `persistence` baseline. `status` `NO_MODEL` / `SERVICE_UNAVAILABLE` instead of values when not possible. |
 | GET | `/api/analytics/prediction-errors?horizon=&page=&pageSize=` | admin | Individual served predictions with actual occupancy and absolute error |
 
 ## ML service (internal; the frontend never calls it)
@@ -112,7 +103,7 @@ Result item: `{ id, label, sublabel, latitude, longitude, kind: 'locality' | 'pl
 | GET | `/health` | `{status, modelsLoaded, activeModelVersion}` |
 | GET | `/models` | `registry.json` as written by training (503 if absent) |
 | GET | `/evaluation` | `ml/evaluation/results.json` (503 if absent) |
+| GET | `/dataset` | Pipeline reports `data/processed/{ingest,occupancy,geo}_report.json` (503 if none) |
 | POST | `/predict` | `{zoneId, timestamp (local wall clock), history[], observedBays, neighbours[{distanceM, history[]}], horizons?, model?, threshold?}` → predictions. `422 INSUFFICIENT_HISTORY` / `503 NO_MODEL` instead of guessing. |
 
-Booking endpoints are documented when that milestone lands.
 

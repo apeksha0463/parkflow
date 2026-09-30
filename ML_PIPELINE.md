@@ -13,7 +13,7 @@ download -> ingest -> occupancy -> geo -> train -> replay
 ## 1. Dataset
 This is the City of Melbourne on-street parking sensors dataset for 2019: 42.7 M sensor state intervals from 6,623 bays.
 See [DATASET.md](DATASET.md) part 2 for its source, licence, the candidates that were rejected, and the preprocessing counts.
-The data is **not Bengaluru data**. It evaluates the method.
+The product replays the test split of the same data (never the training period).
 
 ## 2. Preprocessing (`ingest.py`)
 - The 7.45 GB CSV is streamed in 2 M-row chunks. Only the needed columns are kept, times are stored as int32 seconds, and zones as int codes.
@@ -152,7 +152,7 @@ The only difference between A and B is the neighbour information, which is exact
   - fills in the actual value and absolute error once the target time is observed, for online predicted-vs-actual monitoring
 
 ## 15. Limitations
-- The data is from one city and one year (Melbourne CBD, 2019). Performance on other road networks, parking types or Bengaluru is unknown.
+- The data is from one city and one year (Melbourne CBD, 2019). Performance on other road networks, parking types or cities is unknown.
 - Neighbours are based on straight-line distance, not the road network. One-way streets and turn restrictions are ignored.
 - Occupancy is measured over sensor-equipped bays only, and blocks with fewer than 4 reporting bays are excluded.
 - Predicted "pressure" is a statistical association between neighbouring occupancy and future occupancy. It is **not** evidence that drivers move from one zone to another; the data has no vehicle-level trajectories.

@@ -1,107 +1,59 @@
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import App from './App'
-import { facility, mockApi, renderApp } from './test/utils'
+import { CLOCK, mapZone, mockApi, renderApp, zone } from './test/utils'
 
-const stats = {
-  facilities: 1173,
-  localities: 1121,
-  liveAvailabilityFacilities: 0,
-  demoFacilities: 0,
-  byType: [{ type: 'OFF_STREET', label: 'Off-street', count: 448 }],
-  sources: [{ name: 'OpenStreetMap', sourceType: 'VERIFIED_DIRECTORY', license: 'ODbL', url: null, lastVerifiedAt: '2026-06-01T08:52:28Z' }],
-}
-
-describe('routing', () => {
-  it('renders the landing page with figures from the API', async () => {
+describe('overview', () => {
+  it('shows figures from the API and the replay context, never live', async () => {
     mockApi((u) => {
-      if (u.pathname === '/api/stats') return { body: stats }
-      if (u.pathname === '/api/parking/map') return { body: { items: [], truncated: false } }
+      if (u.pathname === '/api/parking/map') return { body: { at: CLOCK.now, items: [zone('a', 0.95), zone('b', 0.5), zone('c', null)].map(mapZone) } }
     })
     renderApp(<App />)
-    expect(await screen.findByRole('heading', { name: /know where to park before you arrive/i })).toBeInTheDocument()
-    expect(await screen.findByText('1,173')).toBeInTheDocument()
-    expect(screen.getByText('1,121')).toBeInTheDocument()
-    // Illustrative content must be labelled as such.
-    expect(screen.getByText(/illustrative example of the interface, not live data/i)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /forecast parking-pressure spillover before neighbouring zones become saturated/i })).toBeInTheDocument()
+    expect(await screen.findByText('321')).toBeInTheDocument()
+    expect(screen.getByText('4,567')).toBeInTheDocument()
+    expect(screen.getByText('250 m')).toBeInTheDocument()
+    expect(screen.getByText('5 · 15 · 30')).toBeInTheDocument()
+    // replay bar: recorded 2019 time in Melbourne time, labelled as historical replay
+    expect(await screen.findByText(/Tue, 5 Nov 2019, 11:05/)).toBeInTheDocument()
+    expect(screen.getAllByText(/historical replay/i).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/\blive availability\b/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open Parking Map' })).toHaveAttribute('href', '/map')
+  })
+
+  it('controls the shared replay clock', async () => {
+    const user = userEvent.setup()
+    const posts: unknown[] = []
+    mockApi((u, init) => {
+      if (u.pathname === '/api/replay' && init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)))
+        return { body: { ...CLOCK, playing: true } }
+      }
+    })
+    renderApp(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Play replay' }))
+    expect(posts).toEqual([{ playing: true }])
+    expect(await screen.findByRole('button', { name: 'Pause replay' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Forward 1 hour' }))
+    expect(posts[1]).toEqual({ at: '2019-11-05T01:05:00.000Z' })
+  })
+
+  it('has a working mobile menu', async () => {
+    const user = userEvent.setup()
+    mockApi(() => undefined)
+    renderApp(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Open menu' }))
+    const nav = document.getElementById('mobile-nav')!
+    expect(within(nav).getByRole('link', { name: 'Spillover Intelligence' })).toHaveAttribute('href', '/spillover')
+    await user.click(within(nav).getByRole('link', { name: 'Research & Models' }))
+    expect(document.getElementById('mobile-nav')).toBeNull()
   })
 
   it('renders 404 for unknown routes', async () => {
     mockApi(() => undefined)
     renderApp(<App />, { route: '/does-not-exist' })
     expect(await screen.findByRole('heading', { name: /page not found/i })).toBeInTheDocument()
-  })
-})
-
-describe('explore flow', () => {
-  it('prompts for a destination, then lists nearby parking after a search', async () => {
-    const user = userEvent.setup()
-    const parkingCalls: URL[] = []
-    mockApi((u) => {
-      if (u.pathname === '/api/parking/map') return { body: { items: [], truncated: false } }
-      if (u.pathname === '/api/search/geocode')
-        return { body: { geocoder: 'not_used', results: [{ id: 'locality:1', label: 'Koramangala', sublabel: 'Suburb, Bengaluru', latitude: 12.9352, longitude: 77.6245, kind: 'locality', source: 'OSM' }] } }
-      if (u.pathname === '/api/parking') {
-        parkingCalls.push(u)
-        return { body: { items: [facility()], page: 1, pageSize: 20, total: 1, origin: { lat: 12.9352, lng: 77.6245 }, radiusMeters: 2000, sort: 'distance' } }
-      }
-    })
-    renderApp(<App />, { route: '/explore' })
-    expect(await screen.findByText(/where are you heading/i)).toBeInTheDocument()
-
-    await user.type(screen.getByRole('combobox', { name: /search destination/i }), 'kora')
-    await user.click(await screen.findByRole('option', { name: /koramangala/i }))
-
-    // In the explore list a card focuses the map; details and directions are explicit links.
-    expect(await screen.findByRole('button', { name: 'Show Forum Parking on the map' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Details' })).toHaveAttribute('href', '/parking/f1')
-    expect(screen.getByRole('link', { name: /directions/i }).getAttribute('href')).toContain('to=12.93%2C77.61')
-    expect(parkingCalls[0].searchParams.get('lat')).toBe('12.9352')
-    expect(parkingCalls[0].searchParams.get('radius')).toBe('2000')
-    expect(screen.getByText('Availability currently unavailable.')).toBeInTheDocument()
-    expect(screen.getByText(/none of these facilities has a current availability source/i)).toBeInTheDocument()
-  })
-
-  it('shows an empty state with recovery actions when nothing is found', async () => {
-    mockApi((u) => {
-      if (u.pathname === '/api/parking/map') return { body: { items: [], truncated: false } }
-      if (u.pathname === '/api/parking') return { body: { items: [], page: 1, pageSize: 20, total: 0, origin: null, radiusMeters: 2000, sort: 'distance' } }
-    })
-    renderApp(<App />, { route: '/explore?lat=12.9&lng=77.6&label=Somewhere' })
-    expect(await screen.findByText(/no parking found here/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /widen to 5 km/i })).toBeInTheDocument()
-  })
-
-  it('shows a retryable error when the API is unreachable', async () => {
-    const spy = mockApi(() => undefined)
-    spy.mockRejectedValue(new TypeError('Failed to fetch'))
-    renderApp(<App />, { route: '/explore?lat=12.9&lng=77.6&label=Somewhere' })
-    expect(await screen.findByText(/can’t reach parkflow right now/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument()
-  })
-})
-
-describe('facility page', () => {
-  it('shows honest unavailable states, source attribution and neighbours', async () => {
-    mockApi((u) => {
-      if (u.pathname === '/api/parking/f1') return { body: { facility: { ...facility({ name: null, displayName: 'Mall parking near Koramangala', nameIsDerived: true }), zones: [] } } }
-      if (u.pathname === '/api/parking/f1/neighbours') return { body: { radiusMeters: 800, method: 'x', items: [facility({ id: 'f2', displayName: 'Nearby Lot', name: 'Nearby Lot' })] } }
-    })
-    renderApp(<App />, { route: '/parking/f1' })
-    // first render of this lazily loaded route (includes the chart library) can take over a second in CI
-    expect(await screen.findByRole('heading', { name: 'Mall parking near Koramangala' }, { timeout: 5000 })).toBeInTheDocument()
-    expect(screen.getByText(/this label is derived/i)).toBeInTheDocument()
-    expect(screen.getByText('Prediction unavailable — insufficient historical data.')).toBeInTheDocument()
-    expect(screen.getAllByText('Availability currently unavailable.').length).toBeGreaterThan(0)
-    expect(screen.getByRole('link', { name: /view source record/i })).toHaveAttribute('href', 'https://www.openstreetmap.org/way/1')
-    expect(await screen.findByRole('link', { name: 'Nearby Lot' })).toBeInTheDocument()
-  })
-
-  it('shows not-found state for unknown facilities', async () => {
-    mockApi(() => undefined)
-    renderApp(<App />, { route: '/parking/nope' })
-    expect(await screen.findByText(/parking facility not found/i)).toBeInTheDocument()
   })
 })
 

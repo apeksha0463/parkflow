@@ -4,62 +4,81 @@
 
 /*
  * ParkFlow design system tokens.
- * Status colours are semantic — use them only for their meaning (see src/lib/status.ts).
+ * Pressure colours are semantic — use them only for their meaning (see src/lib/pressure.ts, which mirrors
+ * the hex values for Leaflet and charts). Predicted values are violet, spillover warnings amber-red,
+ * research/data context teal.
  */
 @theme {
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
 
   /* Brand */
-  --color-brand-50: #eef3ff;
-  --color-brand-100: #dbe5ff;
-  --color-brand-500: #2f5bea;
-  --color-brand-600: #2349d1;
-  --color-brand-700: #1c3aa8;
+  --color-brand-50: #eff5ff;
+  --color-brand-100: #dbe8fe;
+  --color-brand-500: #2563eb;
+  --color-brand-600: #1d4fd8;
+  --color-brand-700: #1e40af;
 
-  /* Neutrals (ink scale) */
+  /* Neutrals (ink scale, slate-tinted) */
   --color-ink-0: #ffffff;
-  --color-ink-25: #fafbfc;
-  --color-ink-50: #f4f6f9;
-  --color-ink-100: #e9edf2;
-  --color-ink-200: #d7dde5;
-  --color-ink-300: #b6c0cc;
-  --color-ink-400: #8793a3;
-  --color-ink-500: #5f6b7c;
-  --color-ink-600: #455061;
-  --color-ink-700: #2f3846;
-  --color-ink-800: #1d2430;
-  --color-ink-900: #111720;
+  --color-ink-25: #f8fafc;
+  --color-ink-50: #f1f5f9;
+  --color-ink-100: #e2e8f0;
+  --color-ink-200: #cbd5e1;
+  --color-ink-300: #94a3b8;
+  --color-ink-400: #7b8799;
+  --color-ink-500: #5b6678;
+  --color-ink-600: #445063;
+  --color-ink-700: #334155;
+  --color-ink-800: #1e293b;
+  --color-ink-900: #0f172a;
+  --color-ink-950: #0a1020;
 
-  /* Semantic parking status */
-  --color-status-available: #15935a;
-  --color-status-available-bg: #e6f6ee;
-  --color-status-moderate: #b7791f;
-  --color-status-moderate-bg: #fdf4e3;
-  --color-status-nearly-full: #d9580d;
-  --color-status-nearly-full-bg: #fff0e6;
-  --color-status-full: #cf2e3a;
-  --color-status-full-bg: #fdecee;
-  --color-status-unknown: #6b7584;
-  --color-status-unknown-bg: #eef0f3;
+  /* Pressure (semantic) */
+  --color-pressure-normal: #16a34a;
+  --color-pressure-normal-bg: #e8f7ee;
+  --color-pressure-moderate: #a16207;
+  --color-pressure-moderate-bg: #fdf6e3;
+  --color-pressure-high: #c2410c;
+  --color-pressure-high-bg: #fff1e7;
+  --color-pressure-saturated: #dc2626;
+  --color-pressure-saturated-bg: #fdecec;
+  --color-pressure-unknown: #64748b;
+  --color-pressure-unknown-bg: #eef2f6;
   /* Predictions are visually distinct from observations */
-  --color-status-predicted: #6d45d6;
-  --color-status-predicted-bg: #f1ecfd;
-  /* Simulation/demo data label */
-  --color-status-simulated: #0f7c8c;
-  --color-status-simulated-bg: #e3f5f7;
+  --color-predicted: #6d28d9;
+  --color-predicted-bg: #f3eefe;
+  /* Spillover warning */
+  --color-warning: #b45309;
+  --color-warning-bg: #fef6e7;
+  --color-warning-border: #f5d49a;
+  /* Research / data context (historical replay) */
+  --color-data: #0e7490;
+  --color-data-bg: #e6f6f9;
 
   /* Type scale */
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: 1rem;
 
-  /* Radius & elevation */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --shadow-card: 0 1px 2px rgb(17 23 32 / 0.05), 0 1px 3px rgb(17 23 32 / 0.06);
-  --shadow-pop: 0 8px 24px rgb(17 23 32 / 0.12), 0 2px 6px rgb(17 23 32 / 0.06);
+  /* Radius & elevation — restrained */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.05);
+  --shadow-pop: 0 10px 28px rgb(15 23 42 / 0.12), 0 2px 6px rgb(15 23 42 / 0.06);
+
+  --animate-fade-in: fade-in 180ms ease-out both;
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(2px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
 }
 
 @layer base {
@@ -72,6 +91,8 @@
   }
   body {
     min-height: 100dvh;
+    background: var(--color-ink-25);
+    overflow-x: hidden;
   }
   :focus-visible {
     outline: 2px solid var(--color-brand-500);
@@ -83,7 +104,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
@@ -97,35 +120,23 @@
 .leaflet-control-attribution {
   font-size: 10px;
 }
-.pf-marker,
-.pf-cluster,
-.pf-destination {
+.leaflet-tooltip.pf-tooltip {
+  border: 1px solid var(--color-ink-100);
+  border-radius: 6px;
+  box-shadow: var(--shadow-pop);
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--color-ink-800);
+}
+.pf-search-pin {
   background: transparent;
   border: 0;
 }
-.pf-marker svg {
-  filter: drop-shadow(0 1px 2px rgb(17 23 32 / 0.25));
-  transition: transform 120ms ease;
-}
-.pf-marker:hover svg {
-  transform: scale(1.12);
-}
-.pf-cluster-inner {
-  display: grid;
-  place-items: center;
+.pf-search-pin-dot {
+  width: 16px;
+  height: 16px;
   border-radius: 9999px;
-  background: var(--color-ink-800);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  box-shadow: 0 0 0 4px rgb(29 36 48 / 0.18), 0 2px 6px rgb(17 23 32 / 0.2);
-}
-.pf-destination-dot {
-  width: 18px;
-  height: 18px;
-  border-radius: 9999px;
-  background: var(--color-brand-600);
+  background: var(--color-ink-900);
   border: 3px solid #fff;
-  box-shadow: 0 0 0 6px rgb(47 91 234 / 0.2), 0 2px 6px rgb(17 23 32 / 0.3);
+  box-shadow: 0 0 0 6px rgb(15 23 42 / 0.15), 0 2px 6px rgb(15 23 42 / 0.3);
 }

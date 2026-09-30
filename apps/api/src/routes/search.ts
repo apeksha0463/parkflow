@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import { config } from '../config.js';
 import { requireAuth } from '../middleware/auth.js';
-import { GeocoderUnavailableError, mergeResults, searchNominatim, searchZones } from '../services/geocode.js';
+import { byDistanceTo, GeocoderUnavailableError, mergeResults, searchNominatim, searchZones, zoneCentre } from '../services/geocode.js';
 
 export const searchRouter = Router();
 
@@ -30,7 +30,7 @@ searchRouter.get('/geocode', (req, res, next) => (req.query.mode === 'full' ? fu
     return;
   }
   try {
-    const places = await searchNominatim(q);
+    const places = byDistanceTo(await searchNominatim(q), await zoneCentre());
     // Places first on an explicit search: the user asked for a location, zones follow as shortcuts.
     res.json({ results: mergeResults(places, zones), geocoder: 'ok' });
   } catch (err) {

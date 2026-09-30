@@ -1,43 +1,56 @@
-# ParkFlow
+# ParkFlow — Melbourne Parking Intelligence
 
-**Know where to park before you arrive.**
+**Forecast parking-pressure spillover across neighbouring parking zones.**
 
-ParkFlow is a Bengaluru-wide parking discovery platform with an event-based spatial-temporal
-parking-spillover forecasting component. It answers two questions:
+ParkFlow replays the City of Melbourne's 2019 on-street parking-sensor records, detects saturation events with the
+research definition, and uses two trained models (temporal-only and spatial-temporal) to forecast occupancy of the
+neighbouring blocks at 5–30 minutes. It warns where parking pressure is predicted to rise and ranks alternatives.
 
-- *Where is parking available now?* — where a legitimate availability source exists.
-- *Where is parking pressure likely to increase next?* — short-term occupancy forecasts after nearby saturation events.
+> Everything shown is **historical replay** of recorded sensor data (the research test period), never live availability.
+> Predictions are estimates ("predicted occupancy"), not facts. We study parking-pressure propagation after saturation,
+> not individual driver movements.
 
-> Predictions are estimates, not facts. Availability is shown only when a real source exists;
-> otherwise the app says so. Simulated/demo data is always labelled.
+## Pages
+
+| Route | Page |
+|---|---|
+| `/` | **Overview** — headline figures and zone pressure at the replay time, all from the API |
+| `/map` | **Parking Map** — search any Melbourne place, sensor zones in view / nearest, zone details, forecasts, neighbours |
+| `/spillover` | **Spillover Intelligence** — Research Demo, previous/next saturation event, forecasts, affected neighbours, warnings, alternatives, predicted vs actual, event history |
+| `/research` | **Research & Models** — question, methodology, Model A vs B vs baselines from `results.json`, findings, limitations |
+
+The dark bar under the header is the shared **server replay clock** (play/pause, ±5 min, ±1 h, speed, jump to a time).
 
 ## Repository layout
 
 | Path | Purpose |
 |---|---|
-| `apps/web` | React + Vite + TypeScript frontend (Tailwind, Leaflet/OSM) |
+| `apps/web` | React + Vite + TypeScript frontend (Tailwind, Leaflet/OSM, Recharts) |
 | `apps/api` | Node/Express + TypeScript REST API (Prisma, PostgreSQL + PostGIS) |
 | `ml/` | Python ML pipeline (`parkflow_ml`) and FastAPI prediction service (`service`) |
-| `data/raw`, `data/processed` | Research datasets (raw data is **not** committed — see DATASET.md) |
-| `docs/` | Supporting documentation |
+| `data/raw`, `data/processed` | Research data (raw data and large processed files are **not** committed — see DATASET.md) |
 
 ## Quick start (local)
 
-Prerequisites: Node 24+, Python 3.13, Docker Desktop.
+Prerequisites: Node 24+, Python 3.13, Docker Desktop, and the processed research data (see below).
 
 ```bash
 cp .env.example .env            # then edit values
 npm install
 npm run db:up                   # PostGIS in Docker
-npm run dev:api                 # http://localhost:4000/health
-npm run dev:web                 # http://localhost:5173
+npm run db:migrate -w apps/api
+npm run db:seed -w apps/api     # admin account
+npm run db:seed:melbourne -w apps/api   # Melbourne zones, recorded occupancy, neighbours, saturation events (~2 min)
 
 cd ml
 py -3.13 -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt   # Windows
-.venv/Scripts/python -m uvicorn service.app:app --reload --port 8000
+.venv/Scripts/python -m uvicorn service.app:app --port 8000
+cd ..
+npm run dev:api                 # http://localhost:4000/health
+npm run dev:web                 # http://localhost:5173
 ```
 
-### Research pipeline and simulation demo
+### Research pipeline and replay data
 
 ```bash
 cd ml
@@ -48,21 +61,18 @@ cd ml
 .venv/Scripts/python -m parkflow_ml.geo
 .venv/Scripts/python -m parkflow_ml.train     # models -> ml/artifacts, results -> ml/evaluation
 .venv/Scripts/python -m parkflow_ml.plots
-.venv/Scripts/python -m parkflow_ml.replay    # test-period replay data for the demo
-cd ..
-npm run db:seed -w apps/api
-npm run import:osm -w apps/api
-npm run db:seed:simulation -w apps/api        # labelled demo zones around Koramangala
+.venv/Scripts/python -m parkflow_ml.replay    # data/processed/replay_melbourne.json (test split, for the product)
 ```
 
-With the ML service running, the API replays the demo zones (Simulation Mode) and serves real model predictions for them.
-Every other facility shows "Prediction unavailable — insufficient historical data."
+`replay.py` only re-exports the pipeline's processed outputs: every modelled block with data in the test split, its
+coordinates and street description, its research neighbours (200 m) and the research-defined saturation events.
 
 ## Tests
 
 ```bash
 npm test                        # API + web
+npm run build && npm run lint
 cd ml && .venv/Scripts/python -m pytest -q
 ```
 
-See ARCHITECTURE.md, API.md, DATASET.md, ML_PIPELINE.md and RESEARCH.md (TESTING.md and DEPLOYMENT.md land with their milestones).
+See ARCHITECTURE.md, API.md, DATASET.md, ML_PIPELINE.md, RESEARCH.md and TESTING.md.

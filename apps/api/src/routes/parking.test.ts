@@ -3,7 +3,7 @@ import request from 'supertest';
 import { createApp } from '../app.js';
 import { prisma } from '../lib/db.js';
 import { CSRF, createUser, loginAs, resetDb } from '../test/helpers.js';
-import { clearGeocodeCache, mergeResults } from '../services/geocode.js';
+import { byDistanceTo, clearGeocodeCache, mergeResults } from '../services/geocode.js';
 import { clearReplayCache } from '../services/replay.js';
 
 const app = createApp();
@@ -213,6 +213,21 @@ describe('search', () => {
     expect(url).toContain('countrycodes=au');
     expect(url).toContain('bounded=1');
     expect(mergeResults([], [])).toEqual([]);
+  });
+
+  it('orders geocoder matches nearest the monitored zones first', async () => {
+    await fixtures();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          { place_id: 1, lat: '-37.74', lon: '144.96', name: 'Same Name Street', display_name: 'Same Name Street, Far Suburb' },
+          { place_id: 2, lat: String(ORIGIN.lat), lon: String(ORIGIN.lng), name: 'Same Name Street', display_name: 'Same Name Street, Near' },
+        ]),
+      ),
+    );
+    const res = await request(app).get('/api/search/geocode').query({ q: 'same name street', mode: 'full' });
+    expect(res.body.results.map((r: { id: string }) => r.id).slice(0, 2)).toEqual(['nominatim:2', 'nominatim:1']);
+    expect(byDistanceTo([{ latitude: 1, longitude: 1 }], null)).toHaveLength(1);
   });
 
   it('rejects too-short queries', async () => {

@@ -84,7 +84,7 @@ export async function searchNominatim(q: string, fetchImpl: typeof fetch = fetch
     countrycodes: 'au',
     viewbox: `${MELBOURNE_VIEWBOX.west},${MELBOURNE_VIEWBOX.north},${MELBOURNE_VIEWBOX.east},${MELBOURNE_VIEWBOX.south}`,
     bounded: '1',
-    limit: '6',
+    limit: '10',
   });
   const items = await throttled(async () => {
     try {
@@ -114,6 +114,24 @@ export async function searchNominatim(q: string, fetchImpl: typeof fetch = fetch
   if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value!);
   cache.set(key, { at: Date.now(), results });
   return results;
+}
+
+/** Centre of the monitored sensor zones (from the data), or null when there are none. */
+export async function zoneCentre(): Promise<{ lat: number; lng: number } | null> {
+  const r = await prisma.parkingFacility.aggregate({ _avg: { latitude: true, longitude: true } });
+  return r._avg.latitude != null && r._avg.longitude != null ? { lat: r._avg.latitude, lng: r._avg.longitude } : null;
+}
+
+/**
+ * Orders geocoder results by distance to a point (stable for ties). Street names repeat across Greater Melbourne,
+ * so the instance nearest the monitored zones is the most useful match.
+ */
+export function byDistanceTo<T extends { latitude: number; longitude: number }>(items: T[], p: { lat: number; lng: number } | null): T[] {
+  if (!p) return items;
+  return items
+    .map((it, i) => ({ it, i, d: distanceMeters(p.lat, p.lng, it.latitude, it.longitude) }))
+    .sort((a, b) => a.d - b.d || a.i - b.i)
+    .map((x) => x.it);
 }
 
 /** Haversine distance in metres (used for de-duplicating results and in tests). */

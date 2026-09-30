@@ -1,65 +1,75 @@
 # Architecture
 
 ```
-Browser (React SPA, Leaflet/OSM)
-      │ HTTPS (cookie JWT)
+Browser (React SPA, Leaflet/OSM, Recharts)
+      │ HTTPS (same origin /api)
       ▼
 Node/Express API ───────────► PostgreSQL + PostGIS
-      │ HTTP (internal)
-      ▼
-Python FastAPI ML service ──► versioned model artifacts (joblib + registry.json)
+      │ HTTP (internal)          (Melbourne zones, recorded occupancy, research neighbours,
+      ▼                           saturation events, stored predictions, replay clock)
+Python FastAPI ML service ──► versioned model artifacts (joblib + registry.json), results.json, dataset reports
 ```
 
-## Data layers (kept strictly separate)
-1. **City parking directory** — Bengaluru facilities (OpenStreetMap-derived, source-attributed).
-2. **Live availability** — only from real providers via a pluggable provider interface. None connected by default.
-3. **Historical research data** — City of Melbourne on-street sensors 2019 (DATASET.md), used only for the ML experiment (not Bengaluru).
-4. **Predictions** — model outputs, stored with model version for predicted-vs-actual evaluation.
-5. **Demo / simulation** — historical-replay data on clearly labelled demo facilities.
+Every value in the UI flows **dataset → API/ML service → React state → UI**. The frontend contains no zone, occupancy,
+prediction, event or metric values.
+
+## Data layers
+1. **Sensor zones** — City of Melbourne street blocks (research zones with data in the test split), at their real
+   coordinates, with the street description from the source (or the block key when there is none).
+2. **Recorded occupancy** — every 5-minute value of the 2019 test split (+7 days of model-input history), stored with
+   its real timestamp and `sourceType = HISTORICAL_DATA`. Unknown values stay absent; nothing is interpolated.
+3. **Research neighbours** — the pipeline's 200 m neighbour pairs (`ZoneNeighbour`), exactly those the spatial-temporal
+   model was trained with.
+4. **Saturation events** — the research-defined events of the test split (saturated after ≥ 30 min known and below 90%).
+5. **Predictions** — ML-service outputs, stored with model version and base time; reused, and compared with recorded values.
+
+## Historical replay
+- `ml/parkflow_ml/replay.py` exports the above to `data/processed/replay_melbourne.json` (no change to the research
+  pipeline). `npm run db:seed:melbourne -w apps/api` loads it and removes anything else.
+- A single **server replay clock** (`services/replay.ts`, stored in `SystemConfig`) maps wall time to a 2019 instant in
+  the test split: `replayAt + (now − anchor) × speed`, wrapping at the end, floored to the 5-minute grid.
+  `GET/POST /api/replay` reads, seeks, plays/pauses and sets the speed. Every "current" value (availability, pressure,
+  active event, predictions, spillover) is computed at the replay instant.
+- The UI labels all of it **Historical replay** and never calls it live.
 
 ## Key decisions
-- **PostGIS** for radius search, nearest-neighbour and neighbour identification (GiST indexes).
+- **PostGIS** for radius/bbox search; neighbour relations come from the research pairs, not a new radius.
 - **ML isolated** in a Python service; models are trained offline and loaded from artifacts — never retrained per request.
-- **Auth**: JWT in httpOnly, SameSite cookies; bcrypt password hashes; roles `USER` / `ADMIN`.
-- **Geocoding**: Nominatim (OSM) bounded to Bengaluru, cached and throttled per its usage policy.
-
-
-## Data model (apps/api/prisma/schema.prisma)
-- **ParkingFacility**: what users search for. Unknown attributes (capacity, pricing, hours, EV) are `NULL`. `availabilityMode` is `NONE | LIVE | SIMULATION`; `isDemo` marks demo facilities. Linked to a **DataSource** (type, URL, licence, last verified).
-- **ParkingZone**: the unit whose occupancy is tracked/predicted. `WHOLE_FACILITY` for simple lots, `LEVEL` per floor, `SEGMENT` for on-street stretches, `AREA` for large sites. Avoids separate level/segment tables.
-- **OccupancySnapshot** (zone, observedAt, counts, occupancy, sourceType), **SaturationEvent**, **Prediction** (with `actualOccupancy`/`absError` filled in later), **ModelVersion** (metrics copied from the real evaluation run).
-- **Booking** (platform reservations only), **SavedParking**, **RecentSearch**, **AuditLog**, **SystemConfig** (admin settings).
-- PostGIS `geography(Point,4326)` columns on facilities and zones are maintained by triggers from lat/lng and GiST-indexed. CHECK constraints guard coordinates, capacities, occupancy, horizons and booking time order.
-
-## Security model
-- bcrypt (12 rounds) password hashes; timing-equalised login; generic credential errors.
-- JWT (HS256) in `httpOnly` cookie; `tokenVersion` enables server-side revocation on logout/password change.
-- CSRF: custom-header requirement + CORS allow-list. Helmet headers, rate limiting, zod validation on all inputs, Prisma parameterised queries.
-- Production start-up refuses weak secrets, missing DB URL, or localhost URLs.
+- **Model time features** use Melbourne wall-clock time of the base instant, as in training.
+- **Geocoding**: Nominatim bounded to Greater Melbourne (`countrycodes=au`), cached and throttled per its usage policy;
+  results are ordered by distance to the monitored zones (centre computed from the data). Typing suggests matching zones.
 
 ## Prediction flow
 ```
-Explore / Facility page --GET /api/parking/:id/predictions--> Node API
-  Node: availabilityMode NONE / no snapshot / stale --> status + honest message (ML not called)
-  Node: 5-min histories (1 week) of the zone + neighbours within the model's radius (PostGIS ST_DWithin on zones)
-        --POST /predict--> FastAPI: build_features (same code as training) -> HGB models (joblib) -> occupancy per horizon
-  Node: stores Prediction rows (model version, base time, horizon, isSimulated) -> response
-  Later: evaluateDuePredictions() fills actualOccupancy / absError from snapshots at targetTime
+UI --GET /api/parking/:id/predictions--> Node API (at the replay instant)
+  Node: no replay source / no snapshot / stale --> status + honest message (ML not called)
+  Node: 5-min histories (1 week) of the zone + its research neighbours within the model radius
+        --POST /predict--> FastAPI: build_features (same code as training) -> HGB models -> occupancy per horizon
+  Node: stores Prediction rows (model version, base time, horizon) -> response
 ```
-- **Saturation state and events** (`services/spillover.ts`) are derived from the latest snapshot of each zone, using the admin thresholds. Spillover analysis combines neighbours' current availability with their predictions.
-- **Neighbour radii:**
-  - The *model's* neighbour radius is fixed by training (200 m) and read from model metadata.
-  - The *admin* `neighbourRadiusMeters` controls the "nearby / alternatives" lists.
+- **Spillover** (`services/spillover.ts`): neighbours' current occupancy and 15-minute predictions. A neighbour whose
+  predicted occupancy is ≥ the high-pressure threshold and above its current value gets a hedged warning.
+  Alternatives: neighbours with a current reading, below saturation now and predicted, not warned; ranked by
+  predicted occupancy + 0.1 × distance in km.
+- **Predicted vs actual** (`predictedVsActual`): for each 5-minute base time in a window (≤ 3 h), every registered
+  model's prediction next to the recorded value at the target time and the persistence baseline. Missing readings stay null.
+- Verified: for 40 research samples (`ml/evaluation/actual_vs_predicted_sample.csv`), the API's 15-minute predictions
+  match the research outputs to a mean absolute difference of 0.0009 occupancy (max 0.0056). The residual comes from the
+  neighbour set: 8 research zones have no test-split data and are not exported.
 
-## Simulation mode (historical replay)
-- `ml/parkflow_ml/replay.py` exports a cluster of Melbourne blocks from the **test period** only. It picks the block with the most test-period saturation events, plus its nearest neighbours.
-- `npm run db:seed:simulation -w apps/api` creates clearly labelled demo facilities (`isDemo`, `availabilityMode = SIMULATION`, "Simulation demo N") around a real Bengaluru locality (default Koramangala). They keep the cluster's real relative spacing, so neighbour distances match training.
-- On start-up the API (`services/replay.ts`) backfills one week of snapshots and then writes one every 5 minutes. The value comes from the same weekday and time of day, cycling through the exported weeks, with `sourceType = SIMULATION`.
-- The UI marks the markers as dashed and shows "Simulation Mode — historical parking data replay". Real OSM facilities never receive simulated data.
+## Data model (apps/api/prisma/schema.prisma)
+- **ParkingFacility** (one per block, `availabilityMode = REPLAY`) → **ParkingZone** (`SEGMENT`, `replaySourceZone` = block key).
+- **ZoneNeighbour**, **OccupancySnapshot**, **SaturationEvent**, **Prediction**, **ModelVersion**, **DataSource**, **SystemConfig**.
+- Accounts (**User**, **AuditLog**) remain for the admin settings; the product pages need no sign-in.
 
-## Map and search architecture (web)
-- **Map:** Leaflet with OSM/CARTO tiles, starting on the Bengaluru view and clustered with `react-leaflet-cluster`. Markers come from `GET /api/parking/map?bbox=` for the visible viewport, with the bbox rounded so small pans reuse the cache. Marker colour = current availability state; dashed = demo.
-- **Search:** debounced geocoder suggestions (`/api/search/geocode`, Nominatim bounded to Bengaluru). Choosing a result sets `lat/lng/label` in the URL; the map flies there, zooms by radius and the list loads `/api/parking?lat&lng&radius` (paginated).
-- **Search this area:** appears after the view moves more than 25% away from the list's centre (zoom ≥ 13). It lists facilities inside the visible bounds (`bbox`) without moving the map.
-- **Use my location:** browser geolocation. If permission is denied or unavailable, a message appears and the current search stays.
-- **List ↔ map:** clicking a result flies to it, highlights its marker and opens the preview. Clicking a marker highlights and scrolls to the card and opens the preview. The preview shows prediction, spillover warning, details and OSM directions to the recorded coordinates.
+## Security model
+- bcrypt password hashes; JWT in `httpOnly` cookie with server-side revocation; CSRF header + CORS allow-list; Helmet,
+  rate limiting, zod validation, parameterised queries. Production start-up refuses weak secrets or localhost URLs.
+- The replay clock is shared by all viewers of a deployment (a research demo setting, not per-user state).
+
+## Web
+- **Pages:** Overview, Parking Map, Spillover Intelligence, Research & Models (`src/pages`). Shared: `AppShell`
+  (navigation, mobile menu, replay bar), `ZoneMap` (Leaflet circle markers coloured by pressure, links to neighbours /
+  warned zones / alternatives), `ZoneParts` (occupancy readout, forecast strip, zone card), `PredictedVsActualChart`.
+- Queries include the replay instant in their keys, so everything refetches when the clock moves.
+- Pressure colours are semantic tokens (`index.css`, mirrored in `lib/pressure.ts`); thresholds come from `/api/config`.

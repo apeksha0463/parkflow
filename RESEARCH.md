@@ -37,7 +37,7 @@ We do **not** observe individual drivers moving between zones. The dataset has n
 ## 6. Dataset
 City of Melbourne on-street parking bay sensors, 2019 (CC BY): 42.7 M sensor state intervals from 6,623 bays.
 - Chosen after inspecting SFpark (hourly, no capacity or coordinates) and Seattle (occupancy inferred from payments).
-- It is **not** Bengaluru data. It is used to evaluate the method; the product's Bengaluru layer is separate.
+- The product (ParkFlow — Melbourne Parking Intelligence) replays only the test split of this data, as clearly labelled history.
 - Details, measured preprocessing counts and limitations are in [DATASET.md](DATASET.md) part 2.
 
 ## 7. Data preprocessing
@@ -155,8 +155,8 @@ Training with an absolute-error loss (to target the median), or reporting persis
 Any such change must be selected on the validation period and reported as a post-hoc experiment, because the test period has now been seen.
 
 ## 12. Limitations
-- **One city and one year:** Melbourne CBD kerbside parking in 2019. This says nothing directly about Bengaluru, malls, multi-level car parks or other parking types.
-- **Coverage:** not every Bengaluru facility will have live occupancy. The product shows predictions only where a real (or clearly labelled simulated) occupancy series exists.
+- **One city and one year:** Melbourne CBD kerbside parking in 2019. This says nothing directly about other cities, off-street car parks or other parking types.
+- **Replay, not live:** the product demonstrates the method on recorded test-period data; it does not show current availability.
 - **Association, not causation:** parking-pressure propagation is not the same as observing drivers move between zones.
 - **Data quality:** predictions depend on it. Sensor outages reduce the measured capacity; blocks that could not be located (82 of 335) are excluded.
 - **Predictions are not guarantees.** External events (concerts, weather, roadworks, holidays) are not modelled.
@@ -169,4 +169,4 @@ Any such change must be selected on the validation period and reported as a post
 - Try road-network neighbours, different radii and different event definitions as a sensitivity analysis.
 - Evaluate on other cities' sensor datasets and on off-street car parks.
 - Quantify uncertainty (e.g. quantile models) before showing any confidence to users.
-- Connect a real Bengaluru occupancy source; the provider interface and online predicted-vs-actual monitoring are already in place.
+- Connect a live occupancy feed (e.g. the current City of Melbourne sensor API) and monitor predicted vs actual online.

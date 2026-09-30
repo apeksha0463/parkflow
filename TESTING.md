@@ -18,29 +18,25 @@ cd ml && .venv/Scripts/python -m pytest -q      # ML pipeline + ML service
 - **Service:** `/health` without models; `/predict` returns 503 without a model; only trained horizons, in [0, 1], with no confidence field; the temporal model ignores neighbours; short or unknown history is refused with 422; out-of-range input is rejected.
 
 **API (`apps/api/src/**/*.test.ts`)** runs against a real PostGIS test database. The ML service is replaced by a local HTTP stub that checks request plumbing, not accuracy.
-- **Existing coverage:** auth, roles, admin settings and audit, parking list/map/detail/neighbours, geocoding, stats.
-- **Predictions:**
-  - directory-only facilities → "insufficient historical data", without calling ML
-  - no snapshots → insufficient data; old snapshots → stale
-  - ML down → "temporarily unavailable" while discovery still works
-  - correct history grid and neighbour selection within the model radius
-  - predictions are stored and reused
-- **Evaluation:** actual occupancy and absolute error are filled once the target time is observed.
-- **Grid histories:** the latest snapshot per 5-minute instant is used; gaps stay null.
-- **Spillover:**
-  - an event is recorded; the warning uses hedged wording; alternatives come with reasons
-  - re-saturation within 30 minutes is the same event; future-dated snapshots are ignored
-  - ranking excludes closed, saturated and no-data facilities
+- **Existing coverage:** auth, roles, admin settings and audit, parking list/map/detail, stats.
+- **Replay clock:** not configured without a loaded replay; seeks are limited to the replay range; every current value follows the clock.
+- **Neighbours:** come from the research neighbour pairs, nearest first; the model radius is applied.
+- **Predictions:** no source → insufficient data without calling ML; stale data; ML down → "temporarily unavailable"; the model is never applied to (or fed by) a non-replay source; histories and neighbours sent to the model; predictions stored and reused.
+- **Spillover:** active event at the replay time; hedged warning text; warned zones never recommended; alternatives explained; ranking excludes closed, saturated and no-data zones.
+- **Events:** active only between start and end; next/previous navigation, with and without the neighbours filter; 404.
+- **Predicted vs actual:** both models per base time with the recorded outcome and persistence; missing actuals are null; cached; window limits.
+- **Search:** zone suggestions without the geocoder; geocoder bounded to Melbourne (`countrycodes=au`); nearest-to-zones ordering; graceful degradation.
 - **Analytics:** degrades to `mlService: "unavailable"`; prediction errors are admin-only.
 
-**Web (`apps/web/src/**/*.test.tsx`)** replaces Leaflet with a stand-in map that exposes the centre, zoom, markers and viewport callbacks.
-- **Search and map:** search geocodes and moves the map (centre + zoom) and loads nearby parking; markers render; a marker click opens a preview with prediction, details and directions to the facility's coordinates.
-- **List ↔ map:** a result click flies the map to the facility and highlights it.
-- **Search this area:** appears after a pan and queries the visible bounds without moving the map.
-- **Location:** "Use my location" works when permission is granted; a denial shows a message and keeps the search.
-- **Predictions and spillover:** facilities without a source never request predictions; "temporarily unavailable" when ML is down; the spillover warning appears only in a saturation context.
-- **Existing coverage:** routing, 404, unavailable availability, empty/error states, auth, facility page.
+**Web (`apps/web/src/**/*.test.tsx`)** replaces Leaflet with a stand-in map that exposes zones, selection, fly target and highlights. Fixtures live in the tests only.
+- **Overview:** figures and replay time come from the API; replay controls post to the server clock; mobile menu; 404.
+- **Parking map:** zones in view with replayed occupancy and API forecasts, readings first, compact rows for zones without a reading; selecting a zone shows details, threshold, forecast, neighbours and directions; searching a place lists the nearest zones.
+- **Spillover:** Research Demo loads a real event from the API and seeks the replay; warnings and alternatives are rendered exactly as returned; warned zones are highlighted and not recommended; predicted vs actual with missing actuals; event history opens events.
+- **Research:** figures from `results.json` and the dataset reports; findings are derived from the data and change when the data changes; no metrics when the evaluation is unavailable.
+- **Auth:** login errors and registration validation.
+
+**End-to-end (manual, real Chrome):** see the verification section of the final report; covers search for arbitrary Melbourne places, map pan/zoom and Search this area, three zones, several saturation events, warnings, alternatives, predicted vs actual, replay changes and mobile width.
 
 ## Not automated
-- **Real map rendering** (Leaflet tiles, clustering, fly animation) is verified manually in the browser. jsdom has no layout engine.
+- **Real map rendering** (Leaflet tiles, markers, fly animation) is verified in Chrome. jsdom has no layout engine.
 - **Full-dataset runs** (`python -m parkflow_ml.train`) are too heavy for CI. Their outputs are committed as report files (`data/processed/*_report.json`, `ml/evaluation/results.*`).

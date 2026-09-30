@@ -1,60 +1,43 @@
+import { AlertTriangle, Database, Sparkles } from 'lucide-react'
 import { cn } from '../../lib/cn'
-import { SOURCE_KIND_LABEL, type SourceKind } from '../../lib/provenance'
-import { STATUS_LABEL, type ParkingStatus } from '../../lib/status'
-
-const statusStyles: Record<ParkingStatus, string> = {
-  available: 'bg-status-available-bg text-status-available',
-  moderate: 'bg-status-moderate-bg text-status-moderate',
-  nearly_full: 'bg-status-nearly-full-bg text-status-nearly-full',
-  full: 'bg-status-full-bg text-status-full',
-  unknown: 'bg-status-unknown-bg text-status-unknown',
-}
+import { PRESSURE_LABEL, type Pressure } from '../../lib/pressure'
 
 const base = 'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap'
 
-export function StatusBadge({ status, className }: { status: ParkingStatus; className?: string }) {
+const pressureStyles: Record<Pressure, string> = {
+  normal: 'bg-pressure-normal-bg text-pressure-normal',
+  moderate: 'bg-pressure-moderate-bg text-pressure-moderate',
+  high: 'bg-pressure-high-bg text-pressure-high',
+  saturated: 'bg-pressure-saturated-bg text-pressure-saturated',
+  unknown: 'bg-pressure-unknown-bg text-pressure-unknown',
+}
+
+/** Current pressure band (observed/replayed occupancy). Always label + dot, never colour alone. */
+export function PressureBadge({ pressure, className }: { pressure: Pressure; className?: string }) {
   return (
-    <span className={cn(base, statusStyles[status], className)}>
+    <span className={cn(base, pressureStyles[pressure], className)}>
       <span className="size-1.5 rounded-full bg-current" aria-hidden />
-      {STATUS_LABEL[status]}
+      {PRESSURE_LABEL[pressure]}
     </span>
   )
 }
 
-/** Provenance label: every number shown must say whether it is observed, predicted or simulated. */
-export type Provenance = 'observed' | 'predicted' | 'simulated' | 'historical'
+export type Provenance = 'replay' | 'predicted' | 'warning'
 
-const provenanceStyles: Record<Provenance, string> = {
-  observed: 'bg-ink-100 text-ink-700',
-  historical: 'bg-ink-100 text-ink-600',
-  predicted: 'bg-status-predicted-bg text-status-predicted',
-  simulated: 'bg-status-simulated-bg text-status-simulated',
-}
-const provenanceLabel: Record<Provenance, string> = {
-  observed: 'Observed',
-  historical: 'Historical',
-  predicted: 'Predicted',
-  simulated: 'Simulated',
+const provenance: Record<Provenance, { label: string; cls: string; icon: typeof Database }> = {
+  replay: { label: 'Historical replay', cls: 'bg-data-bg text-data', icon: Database },
+  predicted: { label: 'Predicted', cls: 'bg-predicted-bg text-predicted', icon: Sparkles },
+  warning: { label: 'Spillover warning', cls: 'bg-warning-bg text-warning', icon: AlertTriangle },
 }
 
-export function ProvenanceBadge({ kind, className }: { kind: Provenance; className?: string }) {
-  return <span className={cn(base, 'uppercase tracking-wide text-2xs', provenanceStyles[kind], className)}>{provenanceLabel[kind]}</span>
-}
-
-const sourceStyles: Record<SourceKind, string> = {
-  LIVE: 'bg-status-available-bg text-status-available',
-  API: 'bg-brand-50 text-brand-700',
-  HISTORICAL: 'bg-ink-100 text-ink-600',
-  SIMULATION: 'bg-status-simulated-bg text-status-simulated',
-  UNAVAILABLE: 'bg-white text-ink-500 ring-1 ring-inset ring-ink-200',
-}
-
-/** Source of an availability or prediction value: LIVE, API, HISTORICAL, SIMULATION · RESEARCH or UNAVAILABLE. */
-export function SourceBadge({ kind, className }: { kind: SourceKind; className?: string }) {
+/** Where a value comes from: every number shown says whether it is replayed history or a prediction. */
+export function ProvenanceBadge({ kind, label, className }: { kind: Provenance; label?: string; className?: string }) {
+  const p = provenance[kind]
+  const Icon = p.icon
   return (
-    <span className={cn(base, 'uppercase tracking-wide text-2xs', sourceStyles[kind], className)}>
-      {kind === 'LIVE' && <span className="size-1.5 rounded-full bg-current" aria-hidden />}
-      {SOURCE_KIND_LABEL[kind]}
+    <span className={cn(base, 'text-2xs uppercase tracking-wide', p.cls, className)}>
+      <Icon className="size-3" aria-hidden />
+      {label ?? p.label}
     </span>
   )
 }

@@ -18,11 +18,11 @@ interface Props {
 type GeocodeResponse = { results: SearchResult[]; geocoder: 'ok' | 'unavailable' | 'not_used' }
 
 /**
- * Destination search combobox.
- * Typing shows suggestions from ParkFlow's locality index. Pressing Enter runs a full search
- * (localities + OpenStreetMap geocoder) — the geocoder is never called per keystroke.
+ * Location search combobox.
+ * Typing suggests matching sensor zones (City of Melbourne street blocks). Pressing Enter runs a full search
+ * (OpenStreetMap geocoder bounded to Greater Melbourne + zones) — the geocoder is never called per keystroke.
  */
-export function SearchBox({ onSelect, initialValue = '', placeholder = 'Search a destination in Bengaluru', size = 'md', autoFocus, className }: Props) {
+export function SearchBox({ onSelect, initialValue = '', placeholder = 'Search a street, landmark or place in Melbourne', size = 'md', autoFocus, className }: Props) {
   const [text, setText] = useState(initialValue)
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(-1)
@@ -103,7 +103,7 @@ export function SearchBox({ onSelect, initialValue = '', placeholder = 'Search a
           aria-controls={listId}
           aria-autocomplete="list"
           aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
-          aria-label="Search destination"
+          aria-label="Search location"
           autoFocus={autoFocus}
           value={text}
           placeholder={placeholder}
@@ -135,7 +135,7 @@ export function SearchBox({ onSelect, initialValue = '', placeholder = 'Search a
 
       {showPanel && (
         <div className="absolute inset-x-0 top-full z-[1000] mt-1.5 overflow-hidden rounded-lg border border-ink-100 bg-white shadow-pop">
-          <ul id={listId} role="listbox" aria-label="Destinations" className="max-h-80 overflow-y-auto py-1">
+          <ul id={listId} role="listbox" aria-label="Locations" className="max-h-80 overflow-y-auto py-1">
             {results.map((r, i) => (
               <li
                 key={r.id}
@@ -149,7 +149,7 @@ export function SearchBox({ onSelect, initialValue = '', placeholder = 'Search a
                 onMouseEnter={() => setActive(i)}
                 className={cn('flex cursor-pointer items-start gap-3 px-3 py-2.5', i === active && 'bg-brand-50')}
               >
-                {r.kind === 'locality' ? (
+                {r.kind === 'zone' ? (
                   <MapPin className="mt-0.5 size-4 shrink-0 text-brand-600" aria-hidden />
                 ) : (
                   <Navigation className="mt-0.5 size-4 shrink-0 text-ink-400" aria-hidden />
@@ -163,12 +163,12 @@ export function SearchBox({ onSelect, initialValue = '', placeholder = 'Search a
           </ul>
           {!current.isFetching && results.length === 0 && current.isSuccess && (
             <p className="px-3 py-3 text-sm text-ink-500">
-              {fullQuery !== null ? 'No places found in Bengaluru for this search.' : 'No matching areas. Press Enter to search streets and landmarks.'}
+              {fullQuery !== null ? 'No places found in Melbourne for this search.' : 'No matching sensor zones. Press Enter to search streets and landmarks.'}
             </p>
           )}
-          {current.isError && <p className="px-3 py-3 text-sm text-status-full">Search is unavailable right now. Please try again.</p>}
+          {current.isError && <p className="px-3 py-3 text-sm text-pressure-saturated">Search is unavailable right now. Please try again.</p>}
           <div className="flex items-center justify-between border-t border-ink-100 bg-ink-25 px-3 py-1.5 text-2xs text-ink-500">
-            <span>{fullQuery === null ? 'Press Enter to also search streets & landmarks' : full.data?.geocoder === 'unavailable' ? 'Street search unavailable — showing areas only' : 'Areas, streets & landmarks'}</span>
+            <span>{fullQuery === null ? 'Sensor zones · press Enter to search streets & landmarks' : full.data?.geocoder === 'unavailable' ? 'Street search unavailable — showing sensor zones only' : 'Places & sensor zones'}</span>
             <span>© OpenStreetMap</span>
           </div>
         </div>
